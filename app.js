@@ -1,5 +1,9 @@
 const PRICES={'CARTÃO':4.5,'PEQUENO':13,'MÉDIO':18,'GRANDE':30};
 const DELIVERY_PAY=5;
+const SPECIAL_DELIVERY_PAY=8;
+const SPECIAL_DELIVERY_CITIES=new Set(['LIMOEIRO DO AJURU','SALVATERRA','SOURE']);
+function normalizeCityName(city){return String(city||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toUpperCase()}
+function deliveryRate(city){return SPECIAL_DELIVERY_CITIES.has(normalizeCityName(city))?SPECIAL_DELIVERY_PAY:DELIVERY_PAY}
 let data=(window.INITIAL_DATA||[]), charts={}, imports=[{arquivo:'Consolidado_CAF_W2_Transportes.xlsx',registros:data.length,status:'Base inicial'}];
 let payments=JSON.parse(localStorage.getItem('w2_payments_v1')||'[]');
 let activePaymentCity=null;
@@ -27,22 +31,22 @@ function paymentStatus(due,paid){let debt=Math.max(0,due-paid);return debt<.005?
 function renderPayments(){
   let d=filtered(),m={};
   d.forEach(r=>{let city=r.cidade||'NÃO INFORMADA',x=m[city]||(m[city]={awb:0,cafs:new Set(),fat:0});x.awb++;x.cafs.add(r.caf);x.fat+=PRICES[r.tamanho]||0});
-  let totalAwb=d.length,totalPay=totalAwb*DELIVERY_PAY,totalRevenue=d.reduce((s,r)=>s+(PRICES[r.tamanho]||0),0),margin=totalRevenue-totalPay;
+  let totalAwb=d.length,totalPay=d.reduce((s,r)=>s+deliveryRate(r.cidade),0),totalRevenue=d.reduce((s,r)=>s+(PRICES[r.tamanho]||0),0),margin=totalRevenue-totalPay;
   $('#pAwb').textContent=num(totalAwb);$('#pCities').textContent=num(Object.keys(m).length);$('#pPay').textContent=brl(totalPay);$('#pRevenue').textContent=brl(totalRevenue);$('#pMargin').textContent=brl(margin);
   let ready=periodReady();
   let rows=Object.entries(m).sort((a,b)=>b[1].awb-a[1].awb).map(([c,x])=>{
-    let due=x.awb*DELIVERY_PAY,paid=paidFor(c),debt=Math.max(0,due-paid),status=paymentStatus(due,paid),cls=status==='Pago'?'pago':status==='Parcial'?'parcial':'pendente';
+    let rate=deliveryRate(c),due=x.awb*rate,paid=paidFor(c),debt=Math.max(0,due-paid),status=paymentStatus(due,paid),cls=status==='Pago'?'pago':status==='Parcial'?'parcial':'pendente';
     let safeCity=c.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    return `<tr><td>${safeCity}</td><td>${x.cafs.size}</td><td>${num(x.awb)}</td><td>${brl(due)}</td><td class="paid">${brl(paid)}</td><td class="debt">${brl(debt)}</td><td><span class="status-pill status-${cls}">${status}</span></td><td><button type="button" class="pay-btn" data-city="${safeCity}" ${ready?'':'disabled'}>${status==='Pendente'?'Registrar':status==='Parcial'?'Pagar saldo':'Novo pagamento'}</button></td></tr>`;
+    return `<tr><td>${safeCity}</td><td>${x.cafs.size}</td><td>${num(x.awb)}</td><td>${brl(rate)}</td><td>${brl(due)}</td><td class="paid">${brl(paid)}</td><td class="debt">${brl(debt)}</td><td><span class="status-pill status-${cls}">${status}</span></td><td><button type="button" class="pay-btn" data-city="${safeCity}" ${ready?'':'disabled'}>${status==='Pendente'?'Registrar':status==='Parcial'?'Pagar saldo':'Novo pagamento'}</button></td></tr>`;
   });
-  $('#paymentTable').innerHTML=(!ready?'<div class="preview warn"><b>Selecione Ano, Mês e Quinzena</b><p>Os valores devidos são exibidos, mas o registro de pagamentos só é liberado para um fechamento quinzenal específico.</p></div>':'')+table(['Cidade','CAFs','AWBs','Total devido','Já pago','Saldo devedor','Status','Ação'],rows);
+  $('#paymentTable').innerHTML=(!ready?'<div class="preview warn"><b>Selecione Ano, Mês e Quinzena</b><p>Os valores devidos são exibidos, mas o registro de pagamentos só é liberado para um fechamento quinzenal específico.</p></div>':'')+table(['Cidade','CAFs','AWBs','Valor/AWB','Total devido','Já pago','Saldo devedor','Status','Ação'],rows);
   renderPaymentHistory();
 }
 function openPayment(city){
   if(!periodReady()){toast('Selecione Ano, Mês e Quinzena antes de registrar o pagamento.');return}
-  let d=filtered().filter(r=>(r.cidade||'NÃO INFORMADA')===city),due=d.length*DELIVERY_PAY,paid=paidFor(city),debt=Math.max(0,due-paid);
+  let d=filtered().filter(r=>(r.cidade||'NÃO INFORMADA')===city),rate=deliveryRate(city),due=d.length*rate,paid=paidFor(city),debt=Math.max(0,due-paid);
   activePaymentCity=city;
-  $('#paymentContext').textContent=`${city} • ${periodLabel()} • ${num(d.length)} AWBs × R$ 5,00`;
+  $('#paymentContext').textContent=`${city} • ${periodLabel()} • ${num(d.length)} AWBs × ${brl(rate)}`;
   $('#mDue').textContent=brl(due);$('#mPaid').textContent=brl(paid);$('#mDebt').textContent=brl(debt);
   let last=payments.find(x=>x.city===city);$('#mDriver').value=last?.driver||'';$('#mAmount').value=debt>0?debt.toFixed(2):'';$('#mDate').value=new Date().toISOString().slice(0,10);$('#mNote').value='';
   const modal=$('#paymentModal');modal.style.display='flex';modal.classList.add('open');document.body.classList.add('modal-open');
@@ -53,7 +57,7 @@ function registerPayment(){
   if(!activePaymentCity||!periodReady()){toast('Não foi possível identificar o fechamento.');return}
   let amount=Number($('#mAmount').value),driver=$('#mDriver').value.trim(),date=$('#mDate').value,note=$('#mNote').value.trim();
   if(!driver){toast('Informe o nome do entregador.');return}if(!date){toast('Informe a data do pagamento.');return}if(!(amount>0)){toast('Informe um valor de pagamento válido.');return}
-  let d=filtered().filter(r=>(r.cidade||'NÃO INFORMADA')===activePaymentCity),due=d.length*DELIVERY_PAY,paid=paidFor(activePaymentCity),debt=Math.max(0,due-paid);
+  let d=filtered().filter(r=>(r.cidade||'NÃO INFORMADA')===activePaymentCity),rate=deliveryRate(activePaymentCity),due=d.length*rate,paid=paidFor(activePaymentCity),debt=Math.max(0,due-paid);
   if(amount>debt+.005&&debt>0){toast('O pagamento informado é maior que o saldo devedor.');return}
   let p=selectedPeriod();payments.unshift({id:Date.now(),city:activePaymentCity,driver,amount,date,note,year:Number(p.year),month:Number(p.month),quin:Number(p.quin)});savePayments();closePaymentModal();renderPayments();toast(`Pagamento de ${brl(amount)} registrado para ${activePaymentCity}.`)
 }
@@ -83,7 +87,7 @@ document.addEventListener('click',function(e){
   if(payButton){e.preventDefault();if(!payButton.disabled)openPayment(payButton.dataset.city);return;}
   if(e.target.closest('#closePaymentModal')){e.preventDefault();closePaymentModal();return;}
   if(e.target.closest('#savePayment')){e.preventDefault();registerPayment();return;}
-  if(e.target.closest('#payFull')){e.preventDefault();if(!activePaymentCity)return;let d=filtered().filter(r=>(r.cidade||'NÃO INFORMADA')===activePaymentCity),debt=Math.max(0,d.length*DELIVERY_PAY-paidFor(activePaymentCity));$('#mAmount').value=debt.toFixed(2);return;}
+  if(e.target.closest('#payFull')){e.preventDefault();if(!activePaymentCity)return;let d=filtered().filter(r=>(r.cidade||'NÃO INFORMADA')===activePaymentCity),debt=Math.max(0,d.length*deliveryRate(activePaymentCity)-paidFor(activePaymentCity));$('#mAmount').value=debt.toFixed(2);return;}
   if(e.target.closest('#paymentHistoryBtn')){e.preventDefault();let h=$('#paymentHistory');h.style.display=h.style.display==='none'?'block':'none';renderPaymentHistory();return;}
 });
 $('#paymentModal').addEventListener('click',e=>{if(e.target===$('#paymentModal'))closePaymentModal()});
