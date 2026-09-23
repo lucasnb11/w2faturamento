@@ -2,6 +2,6 @@
 // Preencha com os dados de Settings > API do seu projeto Supabase.
 // A anon key pode ficar no frontend; a segurança é feita pelas políticas RLS.
 window.W2_SUPABASE_CONFIG = {
-  url: '',
-  anonKey: ''
+  url: 'https://bdmogkdnhvstcgfuxznz.supabase.co',
+  anonKey: 'sb_publishable_ArqeMb6WS9NFlGt98D4WUQ_gKWhQM0b'
 };
