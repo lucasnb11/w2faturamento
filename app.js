@@ -51,6 +51,40 @@ function handleFile(file){let reader=new FileReader();reader.onload=e=>{try{let 
 function confirmImport(){if(!pendingImport)return;extra=dedupe([...extra,...pendingImport.fresh]);safeSave(STORAGE.extra,extra);data=dedupe([...base,...extra]);let p=pendingImport;imports.unshift({id:Date.now(),arquivo:p.fileName,registros:p.fresh.length,duplicados:p.dups,status:'Importado',calculado:p.calc,oficial:p.official,data:new Date().toISOString()});safeSave(STORAGE.imports,imports);if(window.W2DB?.state?.authenticated){W2DB.saveImport({name:p.fileName,origin:'manual',duplicates:p.dups,calculated:p.calc,official:p.official},p.fresh).catch(e=>{console.error(e);toast('Importação local concluída, mas falhou no Supabase.')})}pendingImport=null;try{populateFilters();render();renderHistory();}catch(err){console.error('W2 init error',err);toast('Falha ao iniciar dados: '+(err.message||err));}$('#preview').innerHTML='';toast('Importação concluída com sucesso.')}
 function renderHistory(){let rows=imports.map(x=>`<tr><td>${x.data?new Date(x.data).toLocaleString('pt-BR'):'—'}</td><td>${x.arquivo}</td><td>${num(x.registros)}</td><td>${num(x.duplicados||0)}</td><td>${x.oficial?brl(x.oficial):'—'}</td><td>${x.status}</td></tr>`);$('#history').innerHTML=rows.length?table(['Data','Arquivo','Novos','Duplicados','Total oficial','Status'],rows):'<p>Nenhuma importação adicional nesta instalação.</p>'}
 function toast(t){$('#toast').textContent=t;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',3200)}
+async function setupHistoricalMigration(){
+  const panel=$('#migrationPanel'),btn=$('#migrateHistoricalBtn'),status=$('#migrationStatus'),bar=$('#migrationBar');
+  if(!panel||!btn)return;
+  const isAdmin=window.W2Auth?.role?.()==='administrador';
+  panel.hidden=!isAdmin;
+  if(!isAdmin)return;
+  if(!window.W2DB?.state?.authenticated){status.textContent='Supabase não conectado.';btn.disabled=true;return}
+  try{
+    const [m,total]=await Promise.all([W2DB.migrationStatus(),W2DB.countEntregas()]);
+    if(m?.status==='concluido'){
+      status.textContent=`Migração concluída • ${num(total)} registros no Supabase • ${num(m.registros_novos||0)} novos • ${num(m.duplicados||0)} duplicados ignorados.`;
+      bar.style.width='100%'; btn.disabled=true; btn.textContent='Migração concluída';
+    }else{
+      status.textContent=`Base local: ${num(base.length)} registros • Supabase: ${num(total)} registros.`;
+    }
+  }catch(e){status.textContent='Não foi possível verificar a migração: '+(e.message||e)}
+  btn.addEventListener('click',runHistoricalMigration,{once:true});
+}
+async function runHistoricalMigration(){
+  const btn=$('#migrateHistoricalBtn'),status=$('#migrationStatus'),bar=$('#migrationBar');
+  if(window.W2Auth?.role?.()!=='administrador')return toast('Somente administradores podem executar a migração.');
+  const source=dedupe((Array.isArray(window.INITIAL_DATA)?window.INITIAL_DATA:[]).map(enrichLegacy));
+  if(!source.length){status.textContent='A base histórica data.js não foi encontrada.';return}
+  btn.disabled=true;btn.textContent='Migrando…';
+  try{
+    const result=await W2DB.migrateHistorical(source,(done,total)=>{const pct=Math.round(done/total*100);bar.style.width=pct+'%';status.textContent=`Migrando ${num(done)} de ${num(total)} registros (${pct}%). Não feche esta página.`});
+    if(result.alreadyDone){bar.style.width='100%';status.textContent=`Migração já concluída • ${num(result.total)} registros no Supabase.`}
+    else{bar.style.width='100%';status.textContent=`Migração concluída • ${num(result.inserted)} novos • ${num(result.duplicates)} duplicados ignorados • ${num(result.after)} registros no Supabase.`}
+    btn.textContent='Migração concluída';
+    const remote=await W2DB.loadRemote();
+    base=remote.entregas.map(W2DB.toLocalEntrega);extra=[];data=dedupe(base);imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
+    populateFilters();render();renderHistory();toast('Base histórica migrada para o Supabase.');
+  }catch(e){console.error(e);status.textContent='Falha na migração: '+(e.message||e);btn.disabled=false;btn.textContent='Tentar novamente';btn.addEventListener('click',runHistoricalMigration,{once:true});toast('Falha ao migrar a base histórica.')}
+}
 function openTab(name){if(window.W2Auth&&!W2Auth.allowed(name)){toast('Seu perfil não possui acesso a esta área.');return}const page=$('#'+name);if(!page)return;$$('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));$$('.page').forEach(x=>x.classList.toggle('active',x.id===name));if(name==='pagamentos')renderPayments();if(name==='importacoes')renderHistory()}
 async function initApp(){
   try{
@@ -72,8 +106,8 @@ async function initApp(){
     document.addEventListener('click',e=>{if(e.target.closest('#monthAll')){$$('#monthMenu input[type=checkbox]').forEach(o=>o.checked=true);updateMonthLabel();render();return}if(e.target.closest('#monthNone')){$$('#monthMenu input[type=checkbox]').forEach(o=>o.checked=false);updateMonthLabel();render();return}if(!e.target.closest('#monthFilter')){$('#monthMenu')?.classList.remove('open');$('#monthToggle')?.classList.remove('open')}});
     document.addEventListener('click',e=>{let b=e.target.closest('.pay-btn');if(b&&!b.disabled)return openPayment(b.dataset.city);if(e.target.closest('#closePaymentModal'))return closePaymentModal();if(e.target.closest('#savePayment'))return registerPayment();if(e.target.closest('#payFull'))return $('#mAmount').value=Number($('#mDebt').textContent.replace(/[^0-9,]/g,'').replace(',','.')).toFixed(2);if(e.target.closest('#paymentHistoryBtn')){let h=$('#paymentHistory');h.style.display=h.style.display==='none'?'block':'none';renderPaymentHistory()}});
     $('#paymentModal')?.addEventListener('click',e=>{if(e.target===$('#paymentModal'))closePaymentModal()});
-    populateFilters();render();renderHistory();
-    console.info(`W2 V2.0.4 iniciado: ${data.length} AWBs carregados (${base.length} base + ${extra.length} importados).`);
+    populateFilters();render();renderHistory();await setupHistoricalMigration();
+    console.info(`W2 V2.3.0 iniciado: ${data.length} AWBs carregados (${base.length} base + ${extra.length} importados).`);
   }catch(err){console.error('W2 init error',err);const t=$('#toast');if(t){t.textContent='Falha ao iniciar: '+(err.message||err);t.style.display='block'}}
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initApp);else initApp();
