@@ -13,10 +13,10 @@
   }
   async function profile(){
     const c=window.W2DB?.state?.client;if(!c||!A.user)return null;
-    let {data,error}=await c.from('perfis').select('*').eq('id',A.user.id).maybeSingle();
+    let {data,error}=await c.from('perfis_faturamento').select('*').eq('id',A.user.id).maybeSingle();
     if(error)throw error;
-    A.profile=data||{id:A.user.id,nome:A.user.email,perfil:'operador',sistema_faturamento:true,ativo:true};
-    if(A.profile.ativo===false||A.profile.sistema_faturamento===false)throw new Error('Usuário sem acesso ao Sistema de Faturamento.');
+    A.profile=data||{id:A.user.id,email:A.user.email,nome:A.user.email,perfil:'operador',ativo:true};
+    if(A.profile.ativo===false)throw new Error('Usuário sem acesso ao Sistema de Faturamento.');
     return A.profile;
   }
   async function boot(){
