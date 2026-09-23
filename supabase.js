@@ -76,12 +76,15 @@
   function toLocalPayment(r){return {id:r.id,city:r.cidade,driver:r.entregador,year:r.ano,month:r.mes,quin:r.quinzena,amount:Number(r.valor||0),date:r.data_pagamento,note:r.observacao||'',createdAt:r.created_at}}
   async function savePayment(p){if(!state.client||!state.authenticated)return null;const row={cidade:p.city,entregador:p.driver,ano:+p.year,mes:+p.month,quinzena:+p.quin,valor:+p.amount,data_pagamento:p.date,observacao:p.note||null};const {data,error}=await state.client.from('pagamentos_entregadores').insert(row).select().single();if(error)throw error;return data}
   async function saveImport(meta,rows){
-    if(!state.client||!state.authenticated)return null;
-    const {data:imp,error:ie}=await state.client.from('importacoes').insert({arquivo_nome:meta.name||'W2 TRANSPORTES.xlsx',arquivo_hash:meta.hash||null,origem:meta.origin||'manual',registros_encontrados:rows.length,registros_novos:rows.length,duplicados:meta.duplicates||0,total_calculado:meta.calculated||null,total_oficial:meta.official||null,status:'importado'}).select().single();
-    if(ie)throw ie;
+    if(!state.client||!state.authenticated)throw new Error('Sessão Supabase não autenticada.');
+    if(meta.hash){const q=await state.client.from('importacoes').select('id,arquivo_nome,status,importado_em').eq('arquivo_hash',meta.hash).eq('status','concluido').limit(1);if(q.error)throw q.error;if(q.data?.length)throw new Error('Este mesmo arquivo já foi importado em '+new Date(q.data[0].importado_em).toLocaleString('pt-BR')+'.');}
+    const row={arquivo_nome:meta.name||'W2 TRANSPORTES.xlsx',arquivo_hash:meta.hash||null,origem:meta.origin||'manual',registros_encontrados:Number(meta.found??rows.length),registros_novos:0,duplicados:Number(meta.duplicates||0),total_calculado:meta.calculated??null,total_oficial:meta.official||null,status:'processando'};
+    const {data:imp,error:ie}=await state.client.from('importacoes').insert(row).select().single();if(ie)throw ie;
     const payload=rows.map(r=>({importacao_id:imp.id,caf_id:String(r.caf||''),awb:String(r.awb||''),data_abertura:r.data_abertura||null,data_finalizacao:r.data||null,peso:Number(r.peso||0),peso_cliente:Number(r.peso_cliente||0)||null,tipo_item:r.tipo_item,categoria:r.tamanho,valor_unitario:Number(r.valor_unitario||0),motorista_id:r.motorista_id||null,motorista:r.motorista||null,cidade:r.cidade||null,uf:r.uf||null,placa:r.placa||null,cliente:r.cliente||null,modelo_pagamento:r.modelo_pagamento||null}));
-    for(let x=0;x<payload.length;x+=500){const {error}=await state.client.from('entregas').upsert(payload.slice(x,x+500),{onConflict:'caf_id,awb',ignoreDuplicates:true});if(error)throw error}
-    return imp;
+    try{
+      for(let x=0;x<payload.length;x+=400){const {error}=await state.client.from('entregas').upsert(payload.slice(x,x+400),{onConflict:'caf_id,awb',ignoreDuplicates:true});if(error)throw error}
+      const {data:done,error}=await state.client.from('importacoes').update({registros_novos:rows.length,status:meta.status||'concluido',erro:null}).eq('id',imp.id).select().single();if(error)throw error;return done;
+    }catch(e){await state.client.from('importacoes').update({status:'erro',erro:String(e.message||e)}).eq('id',imp.id);throw e}
   }
   window.W2DB={state,init,loadRemote,toLocalEntrega,toLocalPayment,savePayment,saveImport,countEntregas,migrationStatus,migrateHistorical};
 })();

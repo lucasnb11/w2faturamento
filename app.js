@@ -10,9 +10,9 @@ const brl=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL
 const norm=s=>String(s??'').trim(), upper=s=>norm(s).toLocaleUpperCase('pt-BR');
 function safeLoad(key){try{const raw=window.localStorage?localStorage.getItem(key):null;if(!raw)return[];const parsed=JSON.parse(raw);return Array.isArray(parsed)?parsed:[]}catch(err){console.warn('W2: armazenamento local inválido em',key,err);try{localStorage.removeItem(key)}catch(_){}return[]}}
 function safeSave(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true}catch(err){console.warn('W2: não foi possível salvar localmente',key,err);return false}}
-let base=Array.isArray(window.INITIAL_DATA)?window.INITIAL_DATA.map(enrichLegacy):[];
-let extra=safeLoad(STORAGE.extra).map(enrichLegacy);
-let data=dedupe([...base,...extra]), charts={}, imports=safeLoad(STORAGE.imports);
+let base=[];
+let extra=[];
+let data=[], charts={}, imports=[];
 let payments=safeLoad(STORAGE.payments), activePaymentCity=null, pendingImport=null;
 function identifyType(awb){return BOX_PREFIXES.some(p=>upper(awb).startsWith(p))?'CAIXA':'CARTÃO'}
 function classify(awb,peso){if(identifyType(awb)==='CARTÃO')return'CARTÃO';peso=Number(peso)||0;return peso<=1?'PEQUENO':peso<=10?'MÉDIO':'GRANDE'}
@@ -44,11 +44,42 @@ function renderPaymentHistory(){let list=payments.filter(paymentMatches).sort((a
 function deletePayment(id){if(confirm('Excluir este pagamento?')){payments=payments.filter(x=>x.id!==id);safeSave(STORAGE.payments,payments);render()}}window.deletePayment=deletePayment;
 function searchCaf(){let q=upper($('#cafSearch').value);if(!q)return $('#cafResult').innerHTML='';let d=data.filter(r=>upper(r.caf).includes(q));if(!d.length)return $('#cafResult').innerHTML='<p>Nenhuma CAF encontrada.</p>';let exact=d.filter(r=>upper(r.caf)===q);if(exact.length)d=exact;let fat=d.reduce((s,r)=>s+PRICES[r.tamanho],0);$('#cafResult').innerHTML=`<div class="cards"><article><label>CAF</label><strong>${d[0].caf}</strong><small>${d[0].cidade}/${d[0].uf}</small></article><article><label>AWBs</label><strong>${d.length}</strong></article><article><label>Faturamento</label><strong>${brl(fat)}</strong></article></div>`+table(['AWB','Tipo','Data','Peso','Categoria','Valor'],d.slice(0,500).map(r=>`<tr><td>${r.awb}</td><td>${r.tipo_item}</td><td>${r.data}</td><td>${r.peso}</td><td>${r.tamanho}</td><td>${brl(PRICES[r.tamanho])}</td></tr>`))}
 function getField(o,...names){let map=Object.fromEntries(Object.keys(o).map(k=>[upper(k),k]));for(let n of names){let k=map[upper(n)];if(k!==undefined)return o[k]}return''}
-function normalizeCAF(o){let awb=norm(getField(o,'awb1','awb')),peso=Number(String(getField(o,'peso')).replace(',','.'))||0;return{caf:norm(getField(o,'cafid1','caf')),data:parseDate(getField(o,'dt_finalizada_caf','dt_finalizada_caf_off','data')),data_abertura:parseDate(getField(o,'dt_abertura_caf')),entregues:Number(getField(o,'entregues'))||0,awb,peso,peso_cliente:Number(String(getField(o,'peso_cliente')).replace(',','.'))||0,tipo_item:identifyType(awb),tamanho:classify(awb,peso),valor_unitario:PRICES[classify(awb,peso)],motorista_id:norm(getField(o,'mot_id1')),motorista:norm(getField(o,'mot_nome1')),cnpj:norm(getField(o,'CNPJ')),razao_social:norm(getField(o,'motemp_razao_social')),placa:norm(getField(o,'vei_placa')),cidade:norm(getField(o,'cidade')),uf:norm(getField(o,'uf')),cliente:norm(getField(o,'nmfantasia')),tipo_produto:norm(getField(o,'ds_tipo_produto')),quinzena_original:norm(getField(o,'quinzena1')),modelo_pagamento:norm(getField(o,'ModeloPagamento'))}}
+function toNumber(v){if(typeof v==='number')return Number.isFinite(v)?v:0;let s=String(v??'').trim();if(!s)return 0;s=s.replace(/R\$\s?/gi,'').replace(/\s/g,'');if(s.includes(',')&&s.includes('.'))s=s.replace(/\./g,'').replace(',','.');else s=s.replace(',','.');let n=Number(s);return Number.isFinite(n)?n:0}
+function normalizeCAF(o){let awb=norm(getField(o,'awb1','awb')),peso=toNumber(getField(o,'peso'));let tamanho=classify(awb,peso);return{caf:norm(getField(o,'cafid1','caf')),data:parseDate(getField(o,'dt_finalizada_caf','dt_finalizada_caf_off','data')),data_abertura:parseDate(getField(o,'dt_abertura_caf')),entregues:toNumber(getField(o,'entregues')),awb,peso,peso_cliente:toNumber(getField(o,'peso_cliente')),tipo_item:identifyType(awb),tamanho,valor_unitario:PRICES[tamanho],motorista_id:norm(getField(o,'mot_id1')),motorista:norm(getField(o,'mot_nome1')),cnpj:norm(getField(o,'CNPJ')),razao_social:norm(getField(o,'motemp_razao_social')),placa:norm(getField(o,'vei_placa')),cidade:norm(getField(o,'cidade')),uf:norm(getField(o,'uf')),cliente:norm(getField(o,'nmfantasia')),tipo_produto:norm(getField(o,'ds_tipo_produto')),quinzena_original:norm(getField(o,'quinzena1')),modelo_pagamento:norm(getField(o,'ModeloPagamento'))}}
+function findHeaderRow(ws,need,maxRows=12){let grid=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true,range:0});for(let i=0;i<Math.min(maxRows,grid.length);i++){let row=grid[i].map(upper);if(need.every(n=>row.includes(upper(n))))return i+1}return 1}
 function sheetJson(ws,headerRow=1){return XLSX.utils.sheet_to_json(ws,{range:headerRow-1,defval:'',raw:true})}
-function parseWorkbook(wb,file){let cafSheet=wb.Sheets['CAFS']||wb.Sheets['CAF_Consolidado'];if(!cafSheet)throw new Error('Aba CAFS não encontrada.');let raw=sheetJson(cafSheet,1),incoming=raw.map(normalizeCAF).filter(r=>r.awb&&r.caf);let required=['cafid1','awb1','peso','cidade'];let keys=raw[0]?Object.keys(raw[0]).map(upper):[];let missing=required.filter(k=>!keys.includes(upper(k)));if(missing.length)throw new Error('Colunas obrigatórias ausentes: '+missing.join(', '));let ap=[];if(wb.Sheets['APURACAO'])ap=sheetJson(wb.Sheets['APURACAO'],2);let official=ap.reduce((s,r)=>s+(Number(getField(r,'Total Pagar'))||0),0),calc=incoming.reduce((s,r)=>s+PRICES[r.tamanho],0);return{incoming,ap,official,calc,fileName:file.name}}
-function handleFile(file){let reader=new FileReader();reader.onload=e=>{try{let wb=XLSX.read(e.target.result,{type:'array',cellDates:true}),p=parseWorkbook(wb,file),existing=new Set(data.map(r=>`${upper(r.caf)}|${upper(r.awb)}`)),fresh=p.incoming.filter(r=>!existing.has(`${upper(r.caf)}|${upper(r.awb)}`)),dups=p.incoming.length-fresh.length;pendingImport={...p,fresh,dups};$('#preview').innerHTML=`<div class="preview"><h3>${file.name}</h3><p><b>${num(p.incoming.length)}</b> registros • <b>${num(new Set(p.incoming.map(r=>r.caf)).size)}</b> CAFs • <b>${num(new Set(p.incoming.map(r=>r.cidade)).size)}</b> cidades</p><p>Calculado pelo sistema: <b>${brl(p.calc)}</b>${p.ap.length?` • Total APURACAO: <b>${brl(p.official)}</b> • Diferença: <b>${brl(p.calc-p.official)}</b>`:''}</p><p class="${dups?'warn':'ok'}">${num(dups)} duplicados ignorados • ${num(fresh.length)} novos</p><button id="confirmImport" ${fresh.length?'':'disabled'}>Confirmar importação</button></div>`;$('#confirmImport')?.addEventListener('click',confirmImport)}catch(err){toast(err.message||'Falha ao ler planilha.')}};reader.readAsArrayBuffer(file)}
-function confirmImport(){if(!pendingImport)return;extra=dedupe([...extra,...pendingImport.fresh]);safeSave(STORAGE.extra,extra);data=dedupe([...base,...extra]);let p=pendingImport;imports.unshift({id:Date.now(),arquivo:p.fileName,registros:p.fresh.length,duplicados:p.dups,status:'Importado',calculado:p.calc,oficial:p.official,data:new Date().toISOString()});safeSave(STORAGE.imports,imports);if(window.W2DB?.state?.authenticated){W2DB.saveImport({name:p.fileName,origin:'manual',duplicates:p.dups,calculated:p.calc,official:p.official},p.fresh).catch(e=>{console.error(e);toast('Importação local concluída, mas falhou no Supabase.')})}pendingImport=null;try{populateFilters();render();renderHistory();}catch(err){console.error('W2 init error',err);toast('Falha ao iniciar dados: '+(err.message||err));}$('#preview').innerHTML='';toast('Importação concluída com sucesso.')}
+function extractOfficial(ap){let vals=ap.map(r=>toNumber(getField(r,'Total Pagar','TOTAL PAGAR'))).filter(v=>v!==0);return vals.length?vals.reduce((a,b)=>a+b,0):0}
+function internalDedupe(rows){let seen=new Set(),out=[],dups=0;for(const r of rows){let k=`${upper(r.caf)}|${upper(r.awb)}`;if(seen.has(k)){dups++;continue}seen.add(k);out.push(r)}return{rows:out,dups}}
+function parseWorkbook(wb,file){
+  let cafSheet=wb.Sheets['CAFS']||wb.Sheets['CAF_Consolidado'];if(!cafSheet)throw new Error('Aba CAFS não encontrada. O arquivo deve conter a aba CAFS.');
+  let headerRow=findHeaderRow(cafSheet,['cafid1','awb1']);let raw=sheetJson(cafSheet,headerRow);if(!raw.length)throw new Error('A aba CAFS está vazia.');
+  let keys=Object.keys(raw[0]).map(upper),required=['cafid1','awb1','peso','cidade'];let missing=required.filter(k=>!keys.includes(upper(k)));if(missing.length)throw new Error('Colunas obrigatórias ausentes na CAFS: '+missing.join(', '));
+  let normalized=raw.map(normalizeCAF).filter(r=>r.awb&&r.caf),inside=internalDedupe(normalized),incoming=inside.rows;
+  let ap=[],apHeader=0;if(wb.Sheets['APURACAO']){apHeader=findHeaderRow(wb.Sheets['APURACAO'],['Total Pagar'],15);ap=sheetJson(wb.Sheets['APURACAO'],apHeader)}
+  let official=extractOfficial(ap),calc=incoming.reduce((s,r)=>s+Number(r.valor_unitario||0),0),difference=official?calc-official:null;
+  return{incoming,ap,official,calc,difference,fileName:file.name,internalDuplicates:inside.dups,headerRow,apHeader}
+}
+async function sha256(buffer){if(!crypto?.subtle)return null;let hash=await crypto.subtle.digest('SHA-256',buffer),bytes=[...new Uint8Array(hash)];return bytes.map(b=>b.toString(16).padStart(2,'0')).join('')}
+function auditClass(diff){if(diff===null)return'warn';return Math.abs(diff)<0.01?'ok':'warn'}
+function handleFile(file){
+  if(!/\.xlsx?$/i.test(file.name))return toast('Selecione um arquivo Excel .xlsx ou .xls.');
+  let reader=new FileReader();reader.onload=async e=>{try{
+    let buffer=e.target.result,wb=XLSX.read(buffer,{type:'array',cellDates:true}),p=parseWorkbook(wb,file),hash=await sha256(buffer),existing=new Set(data.map(r=>`${upper(r.caf)}|${upper(r.awb)}`)),fresh=p.incoming.filter(r=>!existing.has(`${upper(r.caf)}|${upper(r.awb)}`)),dbDups=p.incoming.length-fresh.length,totalDups=dbDups+p.internalDuplicates;
+    pendingImport={...p,fresh,dups:totalDups,dbDups,hash,found:p.incoming.length+p.internalDuplicates};
+    let audit=p.official?`<p class="${auditClass(p.difference)}">Auditoria: sistema <b>${brl(p.calc)}</b> • APURACAO <b>${brl(p.official)}</b> • diferença <b>${brl(p.difference)}</b></p>`:'<p class="warn">A aba APURACAO não trouxe um Total Pagar reconhecível. A importação pode prosseguir, mas ficará sem conciliação oficial.</p>';
+    $('#preview').innerHTML=`<div class="preview"><h3>${file.name}</h3><p><b>${num(p.incoming.length)}</b> AWBs válidos • <b>${num(new Set(p.incoming.map(r=>r.caf)).size)}</b> CAFs • <b>${num(new Set(p.incoming.map(r=>r.cidade)).size)}</b> cidades</p>${audit}<p class="${totalDups?'warn':'ok'}">${num(p.internalDuplicates)} duplicados dentro do arquivo • ${num(dbDups)} já existentes no Supabase • <b>${num(fresh.length)} novos</b></p><p><small>CAFS: cabeçalho detectado na linha ${p.headerRow}${p.ap.length?` • APURACAO: linha ${p.apHeader}`:''}</small></p><button id="confirmImport" ${fresh.length?'':'disabled'}>${fresh.length?'Confirmar importação':'Nenhum registro novo'}</button></div>`;
+    $('#confirmImport')?.addEventListener('click',confirmImport)
+  }catch(err){console.error(err);toast(err.message||'Falha ao ler planilha.')}};reader.readAsArrayBuffer(file)
+}
+async function confirmImport(){
+  if(!pendingImport)return;if(!window.W2DB?.state?.authenticated)return toast('Sessão Supabase não autenticada.');
+  const btn=$('#confirmImport');if(btn){btn.disabled=true;btn.textContent='Importando…'}let p=pendingImport;
+  try{
+    await W2DB.saveImport({name:p.fileName,hash:p.hash,origin:'manual',duplicates:p.dups,found:p.found,calculated:p.calc,official:p.official,status:'concluido'},p.fresh);
+    const remote=await W2DB.loadRemote();base=remote.entregas.map(W2DB.toLocalEntrega);extra=[];data=dedupe(base);payments=remote.pagamentos.map(W2DB.toLocalPayment);imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
+    pendingImport=null;populateFilters();render();renderHistory();$('#preview').innerHTML='<div class="preview ok"><b>Importação concluída e gravada no Supabase.</b></div>';toast('Importação concluída com sucesso.')
+  }catch(e){console.error(e);if(btn){btn.disabled=false;btn.textContent='Tentar novamente'}toast('Falha ao gravar importação no Supabase: '+(e.message||e))}
+}
 function renderHistory(){let rows=imports.map(x=>`<tr><td>${x.data?new Date(x.data).toLocaleString('pt-BR'):'—'}</td><td>${x.arquivo}</td><td>${num(x.registros)}</td><td>${num(x.duplicados||0)}</td><td>${x.oficial?brl(x.oficial):'—'}</td><td>${x.status}</td></tr>`);$('#history').innerHTML=rows.length?table(['Data','Arquivo','Novos','Duplicados','Total oficial','Status'],rows):'<p>Nenhuma importação adicional nesta instalação.</p>'}
 function toast(t){$('#toast').textContent=t;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',3200)}
 async function setupHistoricalMigration(){
@@ -89,7 +120,16 @@ function openTab(name){if(window.W2Auth&&!W2Auth.allowed(name)){toast('Seu perfi
 async function initApp(){
   try{
     if(window.W2Auth){const ok=await W2Auth.boot();if(!ok)return;}
-    if(window.W2DB?.state?.authenticated){try{const remote=await W2DB.loadRemote();if(remote.entregas.length){base=remote.entregas.map(W2DB.toLocalEntrega);extra=[];data=dedupe(base)}if(remote.pagamentos.length){payments=remote.pagamentos.map(W2DB.toLocalPayment)}if(remote.importacoes.length){imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}))}}catch(e){console.warn('W2: falha ao carregar banco, usando base local',e)}}
+    if(!window.W2DB?.state?.authenticated)throw new Error('Sessão Supabase não autenticada. Faça login novamente.');
+    try{
+      const remote=await W2DB.loadRemote();
+      base=remote.entregas.map(W2DB.toLocalEntrega); extra=[]; data=dedupe(base);
+      payments=remote.pagamentos.map(W2DB.toLocalPayment);
+      imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
+    }catch(e){
+      console.error('W2: falha ao carregar dados do Supabase',e);
+      throw new Error('Não foi possível carregar a base do Supabase. Nenhum dado local foi usado. '+(e.message||e));
+    }
     const nav=document.querySelector('nav');
     if(nav) nav.addEventListener('click',e=>{const b=e.target.closest('.tab');if(b){e.preventDefault();openTab(b.dataset.tab)}});
     $$('.filters select').forEach(x=>x.addEventListener('change',render));
@@ -106,8 +146,8 @@ async function initApp(){
     document.addEventListener('click',e=>{if(e.target.closest('#monthAll')){$$('#monthMenu input[type=checkbox]').forEach(o=>o.checked=true);updateMonthLabel();render();return}if(e.target.closest('#monthNone')){$$('#monthMenu input[type=checkbox]').forEach(o=>o.checked=false);updateMonthLabel();render();return}if(!e.target.closest('#monthFilter')){$('#monthMenu')?.classList.remove('open');$('#monthToggle')?.classList.remove('open')}});
     document.addEventListener('click',e=>{let b=e.target.closest('.pay-btn');if(b&&!b.disabled)return openPayment(b.dataset.city);if(e.target.closest('#closePaymentModal'))return closePaymentModal();if(e.target.closest('#savePayment'))return registerPayment();if(e.target.closest('#payFull'))return $('#mAmount').value=Number($('#mDebt').textContent.replace(/[^0-9,]/g,'').replace(',','.')).toFixed(2);if(e.target.closest('#paymentHistoryBtn')){let h=$('#paymentHistory');h.style.display=h.style.display==='none'?'block':'none';renderPaymentHistory()}});
     $('#paymentModal')?.addEventListener('click',e=>{if(e.target===$('#paymentModal'))closePaymentModal()});
-    populateFilters();render();renderHistory();await setupHistoricalMigration();
-    console.info(`W2 V2.3.0 iniciado: ${data.length} AWBs carregados (${base.length} base + ${extra.length} importados).`);
+    populateFilters();render();renderHistory();
+    console.info(`W2 V2.4.0 iniciado: ${data.length} AWBs carregados do Supabase.`);
   }catch(err){console.error('W2 init error',err);const t=$('#toast');if(t){t.textContent='Falha ao iniciar: '+(err.message||err);t.style.display='block'}}
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initApp);else initApp();
