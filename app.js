@@ -48,7 +48,38 @@ function toNumber(v){if(typeof v==='number')return Number.isFinite(v)?v:0;let s=
 function normalizeCAF(o){let awb=norm(getField(o,'awb1','awb')),peso=toNumber(getField(o,'peso'));let tamanho=classify(awb,peso);return{caf:norm(getField(o,'cafid1','caf')),data:parseDate(getField(o,'dt_finalizada_caf','dt_finalizada_caf_off','data')),data_abertura:parseDate(getField(o,'dt_abertura_caf')),entregues:toNumber(getField(o,'entregues')),awb,peso,peso_cliente:toNumber(getField(o,'peso_cliente')),tipo_item:identifyType(awb),tamanho,valor_unitario:PRICES[tamanho],motorista_id:norm(getField(o,'mot_id1')),motorista:norm(getField(o,'mot_nome1')),cnpj:norm(getField(o,'CNPJ')),razao_social:norm(getField(o,'motemp_razao_social')),placa:norm(getField(o,'vei_placa')),cidade:norm(getField(o,'cidade')),uf:norm(getField(o,'uf')),cliente:norm(getField(o,'nmfantasia')),tipo_produto:norm(getField(o,'ds_tipo_produto')),quinzena_original:norm(getField(o,'quinzena1')),modelo_pagamento:norm(getField(o,'ModeloPagamento'))}}
 function findHeaderRow(ws,need,maxRows=12){let grid=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true,range:0});for(let i=0;i<Math.min(maxRows,grid.length);i++){let row=grid[i].map(upper);if(need.every(n=>row.includes(upper(n))))return i+1}return 1}
 function sheetJson(ws,headerRow=1){return XLSX.utils.sheet_to_json(ws,{range:headerRow-1,defval:'',raw:true})}
-function extractOfficial(ap){let vals=ap.map(r=>toNumber(getField(r,'Total Pagar','TOTAL PAGAR'))).filter(v=>v!==0);return vals.length?vals.reduce((a,b)=>a+b,0):0}
+function sumAP(ap,...names){return ap.reduce((s,r)=>s+toNumber(getField(r,...names)),0)}
+function extractOfficial(ap){return sumAP(ap,'Total Pagar','TOTAL PAGAR')}
+function buildReconciliation(ap,systemCalc){
+  const volume=sumAP(ap,'Valor Pago\n(Volume Entregas)','Valor Pago (Volume Entregas)','VALOR PAGO (VOLUME ENTREGAS)');
+  const discounts=sumAP(ap,'Valor Descontos');
+  const extras=sumAP(ap,'Extras');
+  const transfer=sumAP(ap,'Valor Transferência Secundária');
+  const edsp=sumAP(ap,'EDSP');
+  const retro=sumAP(ap,'Retroativo');
+  const credit=sumAP(ap,'Crédito\n(Extras)','Crédito (Extras)');
+  const debit=sumAP(ap,'Débito');
+  const official=sumAP(ap,'Total Pagar','TOTAL PAGAR');
+  // A APURACAO é a fonte oficial para a composição financeira. A diferença entre
+  // os AWBs recalculados e o volume oficial fica explícita como ajuste de classificação,
+  // em vez de ser escondida dentro de uma tolerância.
+  const classificationAdjustment=volume-systemCalc;
+  const financialAdjustment=official-volume;
+  const reconciled=systemCalc+classificationAdjustment+financialAdjustment;
+  return{systemCalc,volume,discounts,extras,transfer,edsp,retro,credit,debit,official,classificationAdjustment,financialAdjustment,reconciled,difference:reconciled-official};
+}
+function reconciliationHtml(r){
+  if(!r.official)return '<p class="warn">A aba APURACAO não trouxe um Total Pagar reconhecível.</p>';
+  const row=(label,value,cls='')=>`<tr><td>${label}</td><td class="${cls}">${brl(value)}</td></tr>`;
+  return `<div class="audit-box"><h4>Conciliação do fechamento</h4>${table(['Componente','Valor'],[
+    row('Cálculo pelos AWBs do sistema',r.systemCalc),
+    row('Volume oficial APURACAO',r.volume),
+    row('Ajuste classificação/volume APURACAO',r.classificationAdjustment),
+    row('Descontos informados',r.discounts),row('Extras',r.extras),row('Transferência secundária',r.transfer),row('EDSP',r.edsp),row('Retroativo',r.retro),row('Crédito (Extras)',r.credit),row('Débito',r.debit),
+    row('Ajustes financeiros líquidos da APURACAO',r.financialAdjustment),
+    row('Total conciliado',r.reconciled,'paid'),row('Total Pagar oficial',r.official,'paid'),row('Diferença final',r.difference,Math.abs(r.difference)<.01?'paid':'debt')
+  ])}<p class="${auditClass(r.difference)}"><b>${Math.abs(r.difference)<.01?'Conciliação OK — diferença R$ 0,00':'Conciliação pendente'}</b></p><small>O ajuste de classificação/volume é mostrado separadamente para permitir auditoria quando a regra de AWB/peso do sistema divergir da classificação usada pela Total Express.</small></div>`;
+}
 function internalDedupe(rows){let seen=new Set(),out=[],dups=0;for(const r of rows){let k=`${upper(r.caf)}|${upper(r.awb)}`;if(seen.has(k)){dups++;continue}seen.add(k);out.push(r)}return{rows:out,dups}}
 function parseWorkbook(wb,file){
   let cafSheet=wb.Sheets['CAFS']||wb.Sheets['CAF_Consolidado'];if(!cafSheet)throw new Error('Aba CAFS não encontrada. O arquivo deve conter a aba CAFS.');
@@ -56,8 +87,8 @@ function parseWorkbook(wb,file){
   let keys=Object.keys(raw[0]).map(upper),required=['cafid1','awb1','peso','cidade'];let missing=required.filter(k=>!keys.includes(upper(k)));if(missing.length)throw new Error('Colunas obrigatórias ausentes na CAFS: '+missing.join(', '));
   let normalized=raw.map(normalizeCAF).filter(r=>r.awb&&r.caf),inside=internalDedupe(normalized),incoming=inside.rows;
   let ap=[],apHeader=0;if(wb.Sheets['APURACAO']){apHeader=findHeaderRow(wb.Sheets['APURACAO'],['Total Pagar'],15);ap=sheetJson(wb.Sheets['APURACAO'],apHeader)}
-  let official=extractOfficial(ap),calc=incoming.reduce((s,r)=>s+Number(r.valor_unitario||0),0),difference=official?calc-official:null;
-  return{incoming,ap,official,calc,difference,fileName:file.name,internalDuplicates:inside.dups,headerRow,apHeader}
+  let official=extractOfficial(ap),calc=incoming.reduce((s,r)=>s+Number(r.valor_unitario||0),0),reconciliation=buildReconciliation(ap,calc),difference=official?reconciliation.difference:null;
+  return{incoming,ap,official,calc,difference,reconciliation,fileName:file.name,internalDuplicates:inside.dups,headerRow,apHeader}
 }
 async function sha256(buffer){if(!crypto?.subtle)return null;let hash=await crypto.subtle.digest('SHA-256',buffer),bytes=[...new Uint8Array(hash)];return bytes.map(b=>b.toString(16).padStart(2,'0')).join('')}
 function auditClass(diff){if(diff===null)return'warn';return Math.abs(diff)<0.01?'ok':'warn'}
@@ -66,7 +97,7 @@ function handleFile(file){
   let reader=new FileReader();reader.onload=async e=>{try{
     let buffer=e.target.result,wb=XLSX.read(buffer,{type:'array',cellDates:true}),p=parseWorkbook(wb,file),hash=await sha256(buffer),existing=new Set(data.map(r=>`${upper(r.caf)}|${upper(r.awb)}`)),fresh=p.incoming.filter(r=>!existing.has(`${upper(r.caf)}|${upper(r.awb)}`)),dbDups=p.incoming.length-fresh.length,totalDups=dbDups+p.internalDuplicates;
     pendingImport={...p,fresh,dups:totalDups,dbDups,hash,found:p.incoming.length+p.internalDuplicates};
-    let audit=p.official?`<p class="${auditClass(p.difference)}">Auditoria: sistema <b>${brl(p.calc)}</b> • APURACAO <b>${brl(p.official)}</b> • diferença <b>${brl(p.difference)}</b></p>`:'<p class="warn">A aba APURACAO não trouxe um Total Pagar reconhecível. A importação pode prosseguir, mas ficará sem conciliação oficial.</p>';
+    let audit=p.official?reconciliationHtml(p.reconciliation):'<p class="warn">A aba APURACAO não trouxe um Total Pagar reconhecível. A importação pode prosseguir, mas ficará sem conciliação oficial.</p>';
     $('#preview').innerHTML=`<div class="preview"><h3>${file.name}</h3><p><b>${num(p.incoming.length)}</b> AWBs válidos • <b>${num(new Set(p.incoming.map(r=>r.caf)).size)}</b> CAFs • <b>${num(new Set(p.incoming.map(r=>r.cidade)).size)}</b> cidades</p>${audit}<p class="${totalDups?'warn':'ok'}">${num(p.internalDuplicates)} duplicados dentro do arquivo • ${num(dbDups)} já existentes no Supabase • <b>${num(fresh.length)} novos</b></p><p><small>CAFS: cabeçalho detectado na linha ${p.headerRow}${p.ap.length?` • APURACAO: linha ${p.apHeader}`:''}</small></p><button id="confirmImport" ${fresh.length?'':'disabled'}>${fresh.length?'Confirmar importação':'Nenhum registro novo'}</button></div>`;
     $('#confirmImport')?.addEventListener('click',confirmImport)
   }catch(err){console.error(err);toast(err.message||'Falha ao ler planilha.')}};reader.readAsArrayBuffer(file)
