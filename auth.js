@@ -8,7 +8,7 @@
   let validating=false;
   function setMessage(t,ok=false){if(!msg)return;msg.textContent=t||'';msg.className='auth-message '+(ok?'ok':'');}
   function showLogin(){document.body.classList.add('auth-pending');document.body.classList.remove('auth-ok');screen.style.display='flex';if(userEmail)userEmail.textContent='';}
-  function showApp(session,perfil){document.body.classList.remove('auth-pending');document.body.classList.add('auth-ok');screen.style.display='none';if(userEmail)userEmail.textContent=(perfil?.nome||session?.user?.email||'Usuário')+(perfil?.perfil?' • '+perfil.perfil:'');window.W2_USER_PROFILE=perfil;}
+  function showApp(session,perfil){document.body.classList.remove('auth-pending');document.body.classList.add('auth-ok');screen.style.display='none';if(userEmail)userEmail.textContent=(perfil?.nome||session?.user?.email||'Usuário')+(perfil?.perfil?' • '+perfil.perfil:'');window.W2_USER_PROFILE=perfil;window.dispatchEvent(new CustomEvent('w2-auth-ready',{detail:{session,perfil}}));}
   if(!configured||!window.supabase){setup.hidden=false;form.querySelectorAll('input,button').forEach(x=>x.disabled=true);setMessage('Configure o Supabase para liberar o acesso.');return;}
   const client=window.supabase.createClient(cfg.url,cfg.anonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
   window.w2Supabase=client;
