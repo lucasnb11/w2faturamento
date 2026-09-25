@@ -1,219 +1,102 @@
-const PRICES={CARTÃO:4.5,PEQUENO:13,MÉDIO:18,GRANDE:30};
-const BOX_PREFIXES=['AMZC','AMZB','TXAQ'];
-const SPECIAL_PAY_CITIES=new Set(['LIMOEIRO DO AJURU','SALVATERRA','SOURE']);
-const STORAGE={payments:'w2_payments_v2',imports:'w2_imports_v2',extra:'w2_extra_data_v2'};
-// Utilitários precisam existir ANTES da normalização de INITIAL_DATA.
-// Na V2.0.3, `norm`/`upper` eram const declaradas depois de `.map(enrichLegacy)`,
-// causando ReferenceError na carga do app e interrompendo filtros e navegação.
-const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const brl=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}), num=v=>Number(v||0).toLocaleString('pt-BR');
-const norm=s=>String(s??'').trim(), upper=s=>norm(s).toLocaleUpperCase('pt-BR');
-function safeLoad(key){try{const raw=window.localStorage?localStorage.getItem(key):null;if(!raw)return[];const parsed=JSON.parse(raw);return Array.isArray(parsed)?parsed:[]}catch(err){console.warn('W2: armazenamento local inválido em',key,err);try{localStorage.removeItem(key)}catch(_){}return[]}}
-function safeSave(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true}catch(err){console.warn('W2: não foi possível salvar localmente',key,err);return false}}
-let base=[];
-let extra=[];
-let data=[], charts={}, imports=[];
-let payments=safeLoad(STORAGE.payments), activePaymentCity=null, pendingImport=null;
-function identifyType(awb){return BOX_PREFIXES.some(p=>upper(awb).startsWith(p))?'CAIXA':'CARTÃO'}
-function classify(awb,peso){if(identifyType(awb)==='CARTÃO')return'CARTÃO';peso=Number(peso)||0;return peso<=1?'PEQUENO':peso<=10?'MÉDIO':'GRANDE'}
-function deliveryRate(city,row){if(row&&identifyType(row.awb)==='CARTÃO')return 3;return SPECIAL_PAY_CITIES.has(upper(city))?8:5}
-function deliveryRateLabel(city,rows=[]){const rates=[...new Set(rows.map(r=>deliveryRate(city,r)))].sort((a,b)=>a-b);return rates.length===1?brl(rates[0]):rates.length?rates.map(brl).join(' / '):'—'}
-function parseDate(raw){if(!raw)return'';if(typeof raw==='number'&&window.XLSX){let x=XLSX.SSF.parse_date_code(raw);return x?`${x.y}-${String(x.m).padStart(2,'0')}-${String(x.d).padStart(2,'0')}`:''}if(raw instanceof Date&&!isNaN(raw))return raw.toISOString().slice(0,10);let s=String(raw);let m=s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);if(m)return`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;let iso=s.match(/(\d{4})-(\d{2})-(\d{2})/);return iso?iso[0]:''}
-function dateParts(s){let m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?{year:+m[1],month:+m[2],quin:+m[3]<=15?1:2}:{} }
-function enrichLegacy(r){let awb=norm(r.awb||r.awb1),peso=Number(r.peso||0),tipo=identifyType(awb),tamanho=classify(awb,peso);return{...r,caf:norm(r.caf||r.cafid1),awb,peso,tipo_item:tipo,tamanho,valor_unitario:PRICES[tamanho],data:parseDate(r.data||r.dt_finalizada_caf),cidade:norm(r.cidade),uf:norm(r.uf)}}
-function dedupe(rows){let seen=new Set();return rows.filter(r=>{let k=`${upper(r.caf)}|${upper(r.awb)}`;if(!r.caf||!r.awb||seen.has(k))return false;seen.add(k);return true})}
-function selectedMonths(){return $$('#monthMenu input[type=checkbox]:checked').map(o=>o.value)}
-function updateMonthLabel(){let m=selectedMonths(),names=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];$('#monthToggle').childNodes[0].nodeValue=!m.length?'Todos os meses ':m.length===1?names[Number(m[0])-1]+' ':m.length===12?'Todos os meses ':m.length+' meses selecionados '}
-function renderMonthMenu(){let names=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];$('#monthMenu').innerHTML=`<div class="month-actions"><button type="button" id="monthAll">Selecionar todos</button><button type="button" id="monthNone">Limpar</button></div>`+names.map((x,i)=>`<label class="month-option"><input type="checkbox" value="${i+1}"> <span>${x}</span></label>`).join('');updateMonthLabel()}
-function filtered(){let months=selectedMonths();return data.filter(r=>{let p=dateParts(r.data);return(!$('#fAno').value||p.year==$('#fAno').value)&&(!months.length||months.includes(String(p.month)))&&(!$('#fQuinzena').value||p.quin==$('#fQuinzena').value)&&(!$('#fCidade').value||r.cidade==$('#fCidade').value)&&(!$('#fTamanho').value||r.tamanho==$('#fTamanho').value)})}
-function populateFilters(){let years=[...new Set(data.map(r=>dateParts(r.data).year).filter(Boolean))].sort(),cities=[...new Set(data.map(r=>r.cidade).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));$('#fAno').innerHTML='<option value="">Todos os anos</option>'+years.map(x=>`<option>${x}</option>`).join('');renderMonthMenu();$('#fCidade').innerHTML='<option value="">Todas as cidades</option>'+cities.map(x=>`<option>${x}</option>`).join('')}
-function makeChart(id,type,labels,values,label){if(typeof window.Chart==='undefined')return;if(charts[id])charts[id].destroy();const c=$(id);if(!c)return;charts[id]=new Chart(c.getContext('2d'),{type,data:{labels,datasets:[{label,data:values,borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,animation:{duration:200},plugins:{legend:{display:type==='doughnut'}},scales:type==='doughnut'?{}:{y:{beginAtZero:true,ticks:{callback:v=>label==='R$'?brl(v):num(v)}}}}})}
-function table(headers,rows){return`<div class="tablewrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`}
-function render(){let d=filtered();$('#kAwb').textContent=num(d.length);$('#kCaf').textContent=num(new Set(d.map(r=>r.caf)).size);$('#kCidade').textContent=num(new Set(d.map(r=>r.cidade)).size);$('#kPeso').textContent=num(d.reduce((s,r)=>s+r.peso,0).toFixed(2))+' kg';$('#kFat').textContent=brl(d.reduce((s,r)=>s+PRICES[r.tamanho],0));let cats=['CARTÃO','PEQUENO','MÉDIO','GRANDE'];makeChart('#chartCat','doughnut',cats,cats.map(c=>d.filter(r=>r.tamanho===c).length),'AWBs');let mm={};d.forEach(r=>{let p=dateParts(r.data),k=p.year+'-'+String(p.month).padStart(2,'0');mm[k]=(mm[k]||0)+PRICES[r.tamanho]});let ks=Object.keys(mm).sort();makeChart('#chartMes','bar',ks,ks.map(k=>mm[k]),'R$');let cm={};d.forEach(r=>cm[r.cidade]=(cm[r.cidade]||0)+1);let top=Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,10);makeChart('#chartCidade','bar',top.map(x=>x[0]),top.map(x=>x[1]),'AWBs');renderCities(d);renderBilling(d);renderPayments(d)}
-function renderCities(d){let m={};d.forEach(r=>{let x=m[r.cidade]??={cafs:new Set(),awb:0,fat:0,pay:0};x.cafs.add(r.caf);x.awb++;x.fat+=PRICES[r.tamanho];x.pay+=deliveryRate(r.cidade,r)});let rows=Object.entries(m).sort((a,b)=>b[1].awb-a[1].awb).map(([c,x])=>`<tr><td>${c}</td><td>${x.cafs.size}</td><td>${num(x.awb)}</td><td>${brl(x.fat)}</td><td>${brl(x.pay)}</td></tr>`);$('#cityTable').innerHTML=table(['Cidade','CAFs','AWBs','Faturamento','Repasse'],rows)}
-function renderBilling(d){let cats=['CARTÃO','PEQUENO','MÉDIO','GRANDE'];let rows=cats.map(c=>{let q=d.filter(r=>r.tamanho===c).length;return`<tr><td>${c}</td><td>${num(q)}</td><td>${brl(PRICES[c])}</td><td><b>${brl(q*PRICES[c])}</b></td></tr>`});$('#billingTable').innerHTML=table(['Categoria','Quantidade','Valor unitário','Total'],rows)}
-function selectedPeriod(){return{year:$('#fAno').value,months:selectedMonths(),quin:$('#fQuinzena').value}}
-function periodReady(){let p=selectedPeriod();return p.year&&p.months.length===1&&p.quin}
-function periodLabel(){let p=selectedPeriod();return periodReady()?`${p.quin}ª quinzena ${String(p.months[0]).padStart(2,'0')}/${p.year}`:'período filtrado'}
-function paymentMatches(p){let s=selectedPeriod();return(!s.year||p.year==s.year)&&(!s.months.length||s.months.includes(String(p.month)))&&(!s.quin||p.quin==s.quin)}
-function paidFor(city){return payments.filter(p=>p.city===city&&paymentMatches(p)).reduce((s,p)=>s+Number(p.amount||0),0)}
-function renderPayments(d=filtered()){let m={};d.forEach(r=>{let c=r.cidade||'NÃO INFORMADA',x=m[c]??={cafs:new Set(),awb:0,due:0,rows:[]};x.cafs.add(r.caf);x.awb++;x.rows.push(r);x.due+=deliveryRate(c,r)});let due=Object.values(m).reduce((s,x)=>s+x.due,0),rev=d.reduce((s,r)=>s+PRICES[r.tamanho],0);$('#pAwb').textContent=num(d.length);$('#pCities').textContent=num(Object.keys(m).length);$('#pPay').textContent=brl(due);$('#pRevenue').textContent=brl(rev);$('#pMargin').textContent=brl(rev-due);let rows=Object.entries(m).sort((a,b)=>b[1].awb-a[1].awb).map(([c,x])=>{let paid=paidFor(c),debt=Math.max(0,x.due-paid),status=debt<=.005?'Pago':paid>0?'Parcial':'Pendente',cls=status.toLowerCase();return`<tr><td>${c}</td><td>${x.cafs.size}</td><td>${num(x.awb)}</td><td>${deliveryRateLabel(c,x.rows)}</td><td>${brl(x.due)}</td><td class="paid">${brl(paid)}</td><td class="debt">${brl(debt)}</td><td><span class="status-pill status-${cls}">${status}</span></td><td><button type="button" class="pay-btn" data-city="${c}">Registrar</button></td></tr>`});$('#paymentTable').innerHTML=table(['Cidade','CAFs','AWBs','Tarifa/AWB','Devido','Pago','Saldo','Status','Ação'],rows);renderPaymentHistory()}
-function paymentModalPeriod(){return{year:$('#mYear')?.value||'',month:$('#mMonth')?.value||'',quin:$('#mQuin')?.value||''}}
-function paymentRowsFor(city,p=paymentModalPeriod()){return data.filter(r=>{let dp=dateParts(r.data);return (r.cidade||'NÃO INFORMADA')===city&&(!p.year||String(dp.year)===String(p.year))&&(!p.month||String(dp.month)===String(p.month))&&(!p.quin||String(dp.quin)===String(p.quin))})}
-function paidForModal(city,p=paymentModalPeriod()){return payments.filter(x=>x.city===city&&String(x.year)===String(p.year)&&String(x.month)===String(p.month)&&String(x.quin)===String(p.quin)).reduce((s,x)=>s+Number(x.amount||0),0)}
-function refreshPaymentModal(){if(!activePaymentCity)return;let p=paymentModalPeriod(),d=paymentRowsFor(activePaymentCity,p),due=d.reduce((s,r)=>s+deliveryRate(activePaymentCity,r),0),paid=(p.year&&p.month&&p.quin)?paidForModal(activePaymentCity,p):0,debt=Math.max(0,due-paid);$('#paymentContext').textContent=`${activePaymentCity} • ${p.year||'Ano'} / ${p.month||'Mês'} / ${p.quin?p.quin+'ª quinzena':'Quinzena'} • ${num(d.length)} AWBs • tarifas ${deliveryRateLabel(activePaymentCity,d)}/AWB`;$('#mDue').textContent=brl(due);$('#mPaid').textContent=brl(paid);$('#mDebt').textContent=brl(debt);$('#mAmount').value=(p.year&&p.month&&p.quin)?debt.toFixed(2):''}
-function openPayment(city){activePaymentCity=city;let years=[...new Set(data.map(r=>dateParts(r.data).year).filter(Boolean))].sort((a,b)=>b-a);$('#mYear').innerHTML='<option value="">Selecione</option>'+years.map(y=>`<option value="${y}">${y}</option>`).join('');$('#mMonth').innerHTML='<option value="">Selecione</option>'+Array.from({length:12},(_,i)=>`<option value="${i+1}">${String(i+1).padStart(2,'0')}</option>`).join('');let sp=selectedPeriod();if(sp.year)$('#mYear').value=sp.year;if(sp.months.length===1)$('#mMonth').value=sp.months[0];if(sp.quin)$('#mQuin').value=sp.quin;$('#mDate').value=new Date().toISOString().slice(0,10);$('#mDriver').value=payments.find(x=>x.city===city)?.driver||'';$('#mNote').value='';refreshPaymentModal();$('#paymentModal').classList.add('open')}
-function closePaymentModal(){$('#paymentModal').classList.remove('open');activePaymentCity=null}
-async function registerPayment(){
-  if(!activePaymentCity)return toast('Selecione uma cidade para registrar o pagamento.');
-  if(!window.W2DB?.state?.authenticated)return toast('Sessão Supabase não autenticada. Faça login novamente.');
-  const btn=$('#savePayment');
-  const amount=Number(String($('#mAmount').value||'').replace(',','.'));
-  const driver=$('#mDriver').value.trim();
-  const date=$('#mDate').value;
-  if(!driver||!date||!(amount>0))return toast('Preencha entregador, valor e data.');
-  const p=paymentModalPeriod();
-  const d=paymentRowsFor(activePaymentCity,p);
-  const due=d.reduce((sum,r)=>sum+deliveryRate(activePaymentCity,r),0);
-  const debt=Math.max(0,due-paidForModal(activePaymentCity,p));
-  if(amount>debt+.005)return toast('Valor maior que o saldo devedor.');
-  if(!p.year||!p.month||!p.quin){toast('Selecione ano, mês e quinzena do pagamento.');if(btn){btn.disabled=false;btn.textContent='Registrar pagamento'}return}
-  const payment={city:activePaymentCity,driver,amount,date,note:$('#mNote').value.trim(),year:+p.year,month:+p.month,quin:+p.quin};
-  try{
-    if(btn){btn.disabled=true;btn.textContent='Registrando…'}
-    const saved=await W2DB.savePayment(payment);
-    if(!saved)throw new Error('O Supabase não retornou o pagamento registrado.');
-    payments.unshift(W2DB.toLocalPayment(saved));
-    safeSave(STORAGE.payments,payments);
-    closePaymentModal();
-    render();
-    toast('Pagamento registrado com sucesso.');
-  }catch(e){
-    console.error('W2: falha ao registrar pagamento',e);
-    toast('Não foi possível registrar o pagamento: '+(e.message||e));
-  }finally{
-    if(btn){btn.disabled=false;btn.textContent='Registrar pagamento'}
-  }
+const PRICES={'CARTÃO':4.5,'PEQUENO':13,'MÉDIO':18,'GRANDE':30};
+const DELIVERY_PAY=5;
+const SPECIAL_DELIVERY_PAY=8;
+const SPECIAL_DELIVERY_CITIES=new Set(['LIMOEIRO DO AJURU','SALVATERRA','SOURE']);
+function normalizeCityName(city){return String(city||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toUpperCase()}
+const CITY_CANONICAL={
+ 'ACARA':'Acará','ANAJAS':'Anajás','BAGRE':'Bagre','BREVES':'Breves','CURRALINHO':'Curralinho',
+ 'ELDORADO DO CARAJAS':'Eldorado do Carajás','GURUPA':'Gurupá','LIMOEIRO DO AJURU':'Limoeiro do Ajuru',
+ 'MELGACO':'Melgaço','MOCAJUBA':'Mocajuba','MUANA':'Muaná','OEIRAS DO PARA':'Oeiras do Pará',
+ 'PONTA DE PEDRAS':'Ponta de Pedras','PORTEL':'Portel','PORTO DE MOZ':'Porto de Moz','SALVATERRA':'Salvaterra',
+ 'SOURE':'Soure','SAO SEBASTIAO DA BOA VISTA':'São Sebastião da Boa Vista'
+};
+function canonicalCity(city){let raw=String(city||'').replace(/\s+/g,' ').trim();if(!raw)return '';let key=normalizeCityName(raw);if(CITY_CANONICAL[key])return CITY_CANONICAL[key];return raw.toLocaleLowerCase('pt-BR').replace(/(^|[\s-])([a-záàâãéêíóôõúüç])/g,(m,a,b)=>a+b.toLocaleUpperCase('pt-BR'))}
+function deliveryRate(city){return SPECIAL_DELIVERY_CITIES.has(normalizeCityName(city))?SPECIAL_DELIVERY_PAY:DELIVERY_PAY}
+let data=(window.INITIAL_DATA||[]).map(r=>({...r,cidade:canonicalCity(r.cidade)})), charts={}, imports=[{arquivo:'Consolidado_CAF_W2_Transportes.xlsx',registros:data.length,status:'Base inicial'}];
+let payments=JSON.parse(localStorage.getItem('w2_payments_v1')||'[]').map(x=>({...x,city:canonicalCity(x.city)}));
+let activePaymentCity=null;
+let selectedMonths=[];
+const MONTH_NAMES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)], brl=v=>v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}), num=v=>Number(v||0).toLocaleString('pt-BR');
+function dateParts(s){let d=new Date((s||'')+'T00:00:00');return isNaN(d)?{}:{year:d.getFullYear(),month:d.getMonth()+1,quin:d.getDate()<=15?1:2}}
+function filtered(){return data.filter(r=>{let p=dateParts(r.data);return(!$('#fAno').value||p.year==$('#fAno').value)&&(!selectedMonths.length||selectedMonths.includes(Number(p.month)))&&(!$('#fQuinzena').value||p.quin==$('#fQuinzena').value)&&(!$('#fCidade').value||r.cidade==$('#fCidade').value)&&(!$('#fTamanho').value||r.tamanho==$('#fTamanho').value)})}
+function populateFilters(){let years=[...new Set(data.map(r=>dateParts(r.data).year).filter(Boolean))].sort(), cities=[...new Set(data.map(r=>r.cidade).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));$('#fAno').innerHTML='<option value="">Todos os anos</option>'+years.map(x=>`<option>${x}</option>`).join('');$('#fCidade').innerHTML='<option value="">Todas as cidades</option>'+cities.map(x=>`<option>${x}</option>`).join('');renderMonthOptions()}
+function renderMonthOptions(){let box=$('#monthOptions');if(!box)return;box.innerHTML=MONTH_NAMES.map((name,i)=>`<label class="month-option"><input type="checkbox" value="${i+1}" ${selectedMonths.includes(i+1)?'checked':''}><span>${name}</span></label>`).join('');updateMonthLabel()}
+function updateMonthLabel(){let b=$('#monthFilterButton');if(!b)return;let text=!selectedMonths.length?'Todos os meses':selectedMonths.length===1?MONTH_NAMES[selectedMonths[0]-1]:`${selectedMonths.length} meses selecionados`;b.innerHTML=`${text} <span>▾</span>`}
+function makeChart(id,type,labels,values,label){if(charts[id]){charts[id].destroy();delete charts[id]}const canvas=$(id);if(!canvas)return;const ctx=canvas.getContext('2d');charts[id]=new Chart(ctx,{type,data:{labels,datasets:[{label,data:values,borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,resizeDelay:150,animation:{duration:250},plugins:{legend:{display:type==='doughnut'}},scales:type==='doughnut'?{}:{y:{beginAtZero:true,ticks:{callback:v=>label==='R$'?brl(v):num(v)}}}}})}
+function render(){let d=filtered();$('#kAwb').textContent=num(d.length);$('#kCaf').textContent=num(new Set(d.map(r=>r.caf)).size);$('#kCidade').textContent=num(new Set(d.map(r=>r.cidade)).size);$('#kPeso').textContent=num(d.reduce((s,r)=>s+Number(r.peso||0),0).toFixed(2))+' kg';$('#kFat').textContent=brl(d.reduce((s,r)=>s+(PRICES[r.tamanho]||0),0));let cats=['CARTÃO','PEQUENO','MÉDIO','GRANDE'];makeChart('#chartCat','doughnut',cats,cats.map(c=>d.filter(r=>r.tamanho===c).length),'AWBs');let mm={};d.forEach(r=>{let p=dateParts(r.data),k=p.year+'-'+String(p.month).padStart(2,'0');mm[k]=(mm[k]||0)+(PRICES[r.tamanho]||0)});let mkeys=Object.keys(mm).sort();makeChart('#chartMes','bar',mkeys,mkeys.map(k=>mm[k]),'R$');let cc={};d.forEach(r=>cc[r.cidade]=(cc[r.cidade]||0)+1);let top=Object.entries(cc).sort((a,b)=>b[1]-a[1]).slice(0,10);makeChart('#chartCidade','bar',top.map(x=>x[0]),top.map(x=>x[1]),'AWBs');renderCities();renderBilling();renderPayments()}
+function table(headers,rows){return `<div class="tablewrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`}
+function renderCities(){let m={};data.forEach(r=>{let x=m[r.cidade]||(m[r.cidade]={awb:0,cafs:new Set(),fat:0});x.awb++;x.cafs.add(r.caf);x.fat+=PRICES[r.tamanho]||0});let rows=Object.entries(m).sort((a,b)=>b[1].awb-a[1].awb).map(([c,x])=>`<tr><td>${c}</td><td>${x.awb}</td><td>${x.cafs.size}</td><td>${brl(x.fat)}</td></tr>`);$('#cityTable').innerHTML=table(['Cidade','AWBs','CAFs','Faturamento'],rows)}
+function renderBilling(){let cats=['CARTÃO','PEQUENO','MÉDIO','GRANDE'],rows=cats.map(c=>{let q=data.filter(r=>r.tamanho===c).length;return `<tr><td>${c}</td><td>${q}</td><td>${brl(PRICES[c])}</td><td>${brl(q*PRICES[c])}</td></tr>`});$('#billingTable').innerHTML=table(['Categoria','Quantidade','Unitário','Total'],rows)}
+
+function selectedPeriod(){return {year:$('#fAno').value,month:selectedMonths.length===1?String(selectedMonths[0]):'',quin:$('#fQuinzena').value}}
+function periodReady(){let p=selectedPeriod();return !!(p.year&&p.month&&p.quin)}
+function periodLabel(p=selectedPeriod()){let months=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];return `${p.quin}ª quinzena de ${months[Number(p.month)]}/${p.year}`}
+function paymentMatchesFilters(x,city){let p=selectedPeriod();return (!city||normalizeCityName(x.city)===normalizeCityName(city))&&(!p.year||String(x.year)===String(p.year))&&(!selectedMonths.length||selectedMonths.includes(Number(x.month)))&&(!p.quin||String(x.quin)===String(p.quin))}
+function paidFor(city){return payments.filter(x=>paymentMatchesFilters(x,city)).reduce((s,x)=>s+Number(x.amount||0),0)}
+function savePayments(){localStorage.setItem('w2_payments_v1',JSON.stringify(payments))}
+function paymentStatus(due,paid){let debt=Math.max(0,due-paid);return debt<.005?'Pago':paid>0?'Parcial':'Pendente'}
+function renderPayments(){
+  let d=filtered(),m={};
+  d.forEach(r=>{let city=r.cidade||'NÃO INFORMADA',x=m[city]||(m[city]={awb:0,cafs:new Set(),fat:0});x.awb++;x.cafs.add(r.caf);x.fat+=PRICES[r.tamanho]||0});
+  let totalAwb=d.length,totalPay=d.reduce((s,r)=>s+deliveryRate(r.cidade),0),totalRevenue=d.reduce((s,r)=>s+(PRICES[r.tamanho]||0),0),margin=totalRevenue-totalPay;
+  $('#pAwb').textContent=num(totalAwb);$('#pCities').textContent=num(Object.keys(m).length);$('#pPay').textContent=brl(totalPay);$('#pRevenue').textContent=brl(totalRevenue);$('#pMargin').textContent=brl(margin);
+  let ready=periodReady();
+  let rows=Object.entries(m).sort((a,b)=>b[1].awb-a[1].awb).map(([c,x])=>{
+    let rate=deliveryRate(c),due=x.awb*rate,paid=paidFor(c),debt=Math.max(0,due-paid),status=paymentStatus(due,paid),cls=status==='Pago'?'pago':status==='Parcial'?'parcial':'pendente';
+    let safeCity=c.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return `<tr><td>${safeCity}</td><td>${x.cafs.size}</td><td>${num(x.awb)}</td><td>${brl(rate)}</td><td>${brl(due)}</td><td class="paid">${brl(paid)}</td><td class="debt">${brl(debt)}</td><td><span class="status-pill status-${cls}">${status}</span></td><td><button type="button" class="pay-btn" data-city="${safeCity}" ${ready?'':'disabled'}>${status==='Pendente'?'Registrar':status==='Parcial'?'Pagar saldo':'Novo pagamento'}</button></td></tr>`;
+  });
+  $('#paymentTable').innerHTML=(!ready?'<div class="preview warn"><b>Selecione Ano, Mês e Quinzena</b><p>Os valores devidos são exibidos, mas o registro de pagamentos só é liberado para um fechamento quinzenal específico.</p></div>':'')+table(['Cidade','CAFs','AWBs','Valor/AWB','Total devido','Já pago','Saldo devedor','Status','Ação'],rows);
+  renderPaymentHistory();
 }
-function renderPaymentHistory(){let list=payments.filter(paymentMatches).sort((a,b)=>(b.date||'').localeCompare(a.date||''));$('#paymentHistory').innerHTML=list.length?table(['Data','Cidade','Entregador','Período','Valor','Observação',''],list.map(x=>`<tr><td>${x.date.split('-').reverse().join('/')}</td><td>${x.city}</td><td>${x.driver}</td><td>${x.quin}ª ${String(x.month).padStart(2,'0')}/${x.year}</td><td>${brl(x.amount)}</td><td>${x.note||'—'}</td><td><button class="danger-link" onclick="deletePayment(${x.id})">Excluir</button></td></tr>`)):'<p>Nenhum pagamento no filtro atual.</p>'}
-function deletePayment(id){if(confirm('Excluir este pagamento?')){payments=payments.filter(x=>x.id!==id);safeSave(STORAGE.payments,payments);render()}}window.deletePayment=deletePayment;
-function searchCaf(){let q=upper($('#cafSearch').value);if(!q)return $('#cafResult').innerHTML='';let d=data.filter(r=>upper(r.caf).includes(q));if(!d.length)return $('#cafResult').innerHTML='<p>Nenhuma CAF encontrada.</p>';let exact=d.filter(r=>upper(r.caf)===q);if(exact.length)d=exact;let fat=d.reduce((s,r)=>s+PRICES[r.tamanho],0);$('#cafResult').innerHTML=`<div class="cards"><article><label>CAF</label><strong>${d[0].caf}</strong><small>${d[0].cidade}/${d[0].uf}</small></article><article><label>AWBs</label><strong>${d.length}</strong></article><article><label>Faturamento</label><strong>${brl(fat)}</strong></article></div>`+table(['AWB','Tipo','Data','Peso','Categoria','Valor'],d.slice(0,500).map(r=>`<tr><td>${r.awb}</td><td>${r.tipo_item}</td><td>${r.data}</td><td>${r.peso}</td><td>${r.tamanho}</td><td>${brl(PRICES[r.tamanho])}</td></tr>`))}
-function getField(o,...names){let map=Object.fromEntries(Object.keys(o).map(k=>[upper(k),k]));for(let n of names){let k=map[upper(n)];if(k!==undefined)return o[k]}return''}
-function toNumber(v){if(typeof v==='number')return Number.isFinite(v)?v:0;let s=String(v??'').trim();if(!s)return 0;s=s.replace(/R\$\s?/gi,'').replace(/\s/g,'');if(s.includes(',')&&s.includes('.'))s=s.replace(/\./g,'').replace(',','.');else s=s.replace(',','.');let n=Number(s);return Number.isFinite(n)?n:0}
-function normalizeCAF(o){let awb=norm(getField(o,'awb1','awb')),peso=toNumber(getField(o,'peso'));let tamanho=classify(awb,peso);return{caf:norm(getField(o,'cafid1','caf')),data:parseDate(getField(o,'dt_finalizada_caf','dt_finalizada_caf_off','data')),data_abertura:parseDate(getField(o,'dt_abertura_caf')),entregues:toNumber(getField(o,'entregues')),awb,peso,peso_cliente:toNumber(getField(o,'peso_cliente')),tipo_item:identifyType(awb),tamanho,valor_unitario:PRICES[tamanho],motorista_id:norm(getField(o,'mot_id1')),motorista:norm(getField(o,'mot_nome1')),cnpj:norm(getField(o,'CNPJ')),razao_social:norm(getField(o,'motemp_razao_social')),placa:norm(getField(o,'vei_placa')),cidade:norm(getField(o,'cidade')),uf:norm(getField(o,'uf')),cliente:norm(getField(o,'nmfantasia')),tipo_produto:norm(getField(o,'ds_tipo_produto')),quinzena_original:norm(getField(o,'quinzena1')),modelo_pagamento:norm(getField(o,'ModeloPagamento'))}}
-function findHeaderRow(ws,need,maxRows=12){let grid=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true,range:0});for(let i=0;i<Math.min(maxRows,grid.length);i++){let row=grid[i].map(upper);if(need.every(n=>row.includes(upper(n))))return i+1}return 1}
-function sheetJson(ws,headerRow=1){return XLSX.utils.sheet_to_json(ws,{range:headerRow-1,defval:'',raw:true})}
-function sumAP(ap,...names){return ap.reduce((s,r)=>s+toNumber(getField(r,...names)),0)}
-function extractOfficial(ap){return sumAP(ap,'Total Pagar','TOTAL PAGAR')}
-function buildReconciliation(ap,systemCalc){
-  const volume=sumAP(ap,'Valor Pago\n(Volume Entregas)','Valor Pago (Volume Entregas)','VALOR PAGO (VOLUME ENTREGAS)');
-  const discounts=sumAP(ap,'Valor Descontos');
-  const extras=sumAP(ap,'Extras');
-  const transfer=sumAP(ap,'Valor Transferência Secundária');
-  const edsp=sumAP(ap,'EDSP');
-  const retro=sumAP(ap,'Retroativo');
-  const credit=sumAP(ap,'Crédito\n(Extras)','Crédito (Extras)');
-  const debit=sumAP(ap,'Débito');
-  const official=sumAP(ap,'Total Pagar','TOTAL PAGAR');
-  // A APURACAO é a fonte oficial para a composição financeira. A diferença entre
-  // os AWBs recalculados e o volume oficial fica explícita como ajuste de classificação,
-  // em vez de ser escondida dentro de uma tolerância.
-  const classificationAdjustment=volume-systemCalc;
-  const financialAdjustment=official-volume;
-  const reconciled=systemCalc+classificationAdjustment+financialAdjustment;
-  return{systemCalc,volume,discounts,extras,transfer,edsp,retro,credit,debit,official,classificationAdjustment,financialAdjustment,reconciled,difference:reconciled-official};
+function openPayment(city){
+  if(!periodReady()){toast('Selecione Ano, Mês e Quinzena antes de registrar o pagamento.');return}
+  let d=filtered().filter(r=>(r.cidade||'NÃO INFORMADA')===city),rate=deliveryRate(city),due=d.length*rate,paid=paidFor(city),debt=Math.max(0,due-paid);
+  activePaymentCity=city;
+  $('#paymentContext').textContent=`${city} • ${periodLabel()} • ${num(d.length)} AWBs × ${brl(rate)}`;
+  $('#mDue').textContent=brl(due);$('#mPaid').textContent=brl(paid);$('#mDebt').textContent=brl(debt);
+  let last=payments.find(x=>normalizeCityName(x.city)===normalizeCityName(city));$('#mDriver').value=last?.driver||'';$('#mAmount').value=debt>0?debt.toFixed(2):'';$('#mDate').value=new Date().toISOString().slice(0,10);$('#mNote').value='';
+  const modal=$('#paymentModal');modal.style.display='flex';modal.classList.add('open');document.body.classList.add('modal-open');
+  setTimeout(()=>$('#mDriver').focus(),50);
 }
-function reconciliationHtml(r){
-  if(!r.official)return '<p class="warn">A aba APURACAO não trouxe um Total Pagar reconhecível.</p>';
-  const row=(label,value,cls='')=>`<tr><td>${label}</td><td class="${cls}">${brl(value)}</td></tr>`;
-  return `<div class="audit-box"><h4>Conciliação do fechamento</h4>${table(['Componente','Valor'],[
-    row('Cálculo pelos AWBs do sistema',r.systemCalc),
-    row('Volume oficial APURACAO',r.volume),
-    row('Ajuste classificação/volume APURACAO',r.classificationAdjustment),
-    row('Descontos informados',r.discounts),row('Extras',r.extras),row('Transferência secundária',r.transfer),row('EDSP',r.edsp),row('Retroativo',r.retro),row('Crédito (Extras)',r.credit),row('Débito',r.debit),
-    row('Ajustes financeiros líquidos da APURACAO',r.financialAdjustment),
-    row('Total conciliado',r.reconciled,'paid'),row('Total Pagar oficial',r.official,'paid'),row('Diferença final',r.difference,Math.abs(r.difference)<.01?'paid':'debt')
-  ])}<p class="${auditClass(r.difference)}"><b>${Math.abs(r.difference)<.01?'Conciliação OK — diferença R$ 0,00':'Conciliação pendente'}</b></p><small>O ajuste de classificação/volume é mostrado separadamente para permitir auditoria quando a regra de AWB/peso do sistema divergir da classificação usada pela Total Express.</small></div>`;
+function closePaymentModal(){const modal=$('#paymentModal');modal.classList.remove('open');modal.style.display='none';document.body.classList.remove('modal-open');activePaymentCity=null}
+function registerPayment(){
+  if(!activePaymentCity||!periodReady()){toast('Não foi possível identificar o fechamento.');return}
+  let amount=Number($('#mAmount').value),driver=$('#mDriver').value.trim(),date=$('#mDate').value,note=$('#mNote').value.trim();
+  if(!driver){toast('Informe o nome do entregador.');return}if(!date){toast('Informe a data do pagamento.');return}if(!(amount>0)){toast('Informe um valor de pagamento válido.');return}
+  let d=filtered().filter(r=>(r.cidade||'NÃO INFORMADA')===activePaymentCity),rate=deliveryRate(activePaymentCity),due=d.length*rate,paid=paidFor(activePaymentCity),debt=Math.max(0,due-paid);
+  if(amount>debt+.005&&debt>0){toast('O pagamento informado é maior que o saldo devedor.');return}
+  let p=selectedPeriod();payments.unshift({id:Date.now(),city:activePaymentCity,driver,amount,date,note,year:Number(p.year),month:Number(p.month),quin:Number(p.quin)});savePayments();closePaymentModal();renderPayments();toast(`Pagamento de ${brl(amount)} registrado para ${activePaymentCity}.`)
 }
-function internalDedupe(rows){let seen=new Set(),out=[],dups=0;for(const r of rows){let k=`${upper(r.caf)}|${upper(r.awb)}`;if(seen.has(k)){dups++;continue}seen.add(k);out.push(r)}return{rows:out,dups}}
-function parseWorkbook(wb,file){
-  let cafSheet=wb.Sheets['CAFS']||wb.Sheets['CAF_Consolidado'];if(!cafSheet)throw new Error('Aba CAFS não encontrada. O arquivo deve conter a aba CAFS.');
-  let headerRow=findHeaderRow(cafSheet,['cafid1','awb1']);let raw=sheetJson(cafSheet,headerRow);if(!raw.length)throw new Error('A aba CAFS está vazia.');
-  let keys=Object.keys(raw[0]).map(upper),required=['cafid1','awb1','peso','cidade'];let missing=required.filter(k=>!keys.includes(upper(k)));if(missing.length)throw new Error('Colunas obrigatórias ausentes na CAFS: '+missing.join(', '));
-  let normalized=raw.map(normalizeCAF).filter(r=>r.awb&&r.caf),inside=internalDedupe(normalized),incoming=inside.rows;
-  let ap=[],apHeader=0;if(wb.Sheets['APURACAO']){apHeader=findHeaderRow(wb.Sheets['APURACAO'],['Total Pagar'],15);ap=sheetJson(wb.Sheets['APURACAO'],apHeader)}
-  let official=extractOfficial(ap),calc=incoming.reduce((s,r)=>s+Number(r.valor_unitario||0),0),reconciliation=buildReconciliation(ap,calc),difference=official?reconciliation.difference:null;
-  return{incoming,ap,official,calc,difference,reconciliation,fileName:file.name,internalDuplicates:inside.dups,headerRow,apHeader}
-}
-async function sha256(buffer){if(!crypto?.subtle)return null;let hash=await crypto.subtle.digest('SHA-256',buffer),bytes=[...new Uint8Array(hash)];return bytes.map(b=>b.toString(16).padStart(2,'0')).join('')}
-function auditClass(diff){if(diff===null)return'warn';return Math.abs(diff)<0.01?'ok':'warn'}
-function handleFile(file){
-  if(!/\.xlsx?$/i.test(file.name))return toast('Selecione um arquivo Excel .xlsx ou .xls.');
-  let reader=new FileReader();reader.onload=async e=>{try{
-    let buffer=e.target.result,wb=XLSX.read(buffer,{type:'array',cellDates:true}),p=parseWorkbook(wb,file),hash=await sha256(buffer),existing=new Set(data.map(r=>`${upper(r.caf)}|${upper(r.awb)}`)),fresh=p.incoming.filter(r=>!existing.has(`${upper(r.caf)}|${upper(r.awb)}`)),dbDups=p.incoming.length-fresh.length,totalDups=dbDups+p.internalDuplicates;
-    pendingImport={...p,fresh,dups:totalDups,dbDups,hash,found:p.incoming.length+p.internalDuplicates};
-    let audit=p.official?reconciliationHtml(p.reconciliation):'<p class="warn">A aba APURACAO não trouxe um Total Pagar reconhecível. A importação pode prosseguir, mas ficará sem conciliação oficial.</p>';
-    $('#preview').innerHTML=`<div class="preview"><h3>${file.name}</h3><p><b>${num(p.incoming.length)}</b> AWBs válidos • <b>${num(new Set(p.incoming.map(r=>r.caf)).size)}</b> CAFs • <b>${num(new Set(p.incoming.map(r=>r.cidade)).size)}</b> cidades</p>${audit}<p class="${totalDups?'warn':'ok'}">${num(p.internalDuplicates)} duplicados dentro do arquivo • ${num(dbDups)} já existentes no Supabase • <b>${num(fresh.length)} novos</b></p><p><small>CAFS: cabeçalho detectado na linha ${p.headerRow}${p.ap.length?` • APURACAO: linha ${p.apHeader}`:''}</small></p><button id="confirmImport" ${fresh.length?'':'disabled'}>${fresh.length?'Confirmar importação':'Nenhum registro novo'}</button></div>`;
-    $('#confirmImport')?.addEventListener('click',confirmImport)
-  }catch(err){console.error(err);toast(err.message||'Falha ao ler planilha.')}};reader.readAsArrayBuffer(file)
-}
-async function confirmImport(){
-  if(!pendingImport)return;if(!window.W2DB?.state?.authenticated)return toast('Sessão Supabase não autenticada.');
-  const btn=$('#confirmImport');if(btn){btn.disabled=true;btn.textContent='Importando…'}let p=pendingImport;
-  try{
-    await W2DB.saveImport({name:p.fileName,hash:p.hash,origin:'manual',duplicates:p.dups,found:p.found,calculated:p.calc,official:p.official,status:'concluido'},p.fresh);
-    const remote=await W2DB.loadRemote();base=remote.entregas.map(W2DB.toLocalEntrega);extra=[];data=dedupe(base);payments=remote.pagamentos.map(W2DB.toLocalPayment);imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
-    pendingImport=null;populateFilters();render();renderHistory();$('#preview').innerHTML='<div class="preview ok"><b>Importação concluída e gravada no Supabase.</b></div>';toast('Importação concluída com sucesso.')
-  }catch(e){console.error(e);if(btn){btn.disabled=false;btn.textContent='Tentar novamente'}toast('Falha ao gravar importação no Supabase: '+(e.message||e))}
-}
-function renderHistory(){let rows=imports.map(x=>`<tr><td>${x.data?new Date(x.data).toLocaleString('pt-BR'):'—'}</td><td>${x.arquivo}</td><td>${num(x.registros)}</td><td>${num(x.duplicados||0)}</td><td>${x.oficial?brl(x.oficial):'—'}</td><td>${x.status}</td></tr>`);$('#history').innerHTML=rows.length?table(['Data','Arquivo','Novos','Duplicados','Total oficial','Status'],rows):'<p>Nenhuma importação adicional nesta instalação.</p>'}
-function toast(t){$('#toast').textContent=t;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',3200)}
-async function setupHistoricalMigration(){
-  const panel=$('#migrationPanel'),btn=$('#migrateHistoricalBtn'),status=$('#migrationStatus'),bar=$('#migrationBar');
-  if(!panel||!btn)return;
-  const isAdmin=window.W2Auth?.role?.()==='administrador';
-  panel.hidden=!isAdmin;
-  if(!isAdmin)return;
-  if(!window.W2DB?.state?.authenticated){status.textContent='Supabase não conectado.';btn.disabled=true;return}
-  try{
-    const [m,total]=await Promise.all([W2DB.migrationStatus(),W2DB.countEntregas()]);
-    if(m?.status==='concluido'){
-      status.textContent=`Migração concluída • ${num(total)} registros no Supabase • ${num(m.registros_novos||0)} novos • ${num(m.duplicados||0)} duplicados ignorados.`;
-      bar.style.width='100%'; btn.disabled=true; btn.textContent='Migração concluída';
-    }else{
-      status.textContent=`Base local: ${num(base.length)} registros • Supabase: ${num(total)} registros.`;
-    }
-  }catch(e){status.textContent='Não foi possível verificar a migração: '+(e.message||e)}
-  btn.addEventListener('click',runHistoricalMigration,{once:true});
-}
-async function runHistoricalMigration(){
-  const btn=$('#migrateHistoricalBtn'),status=$('#migrationStatus'),bar=$('#migrationBar');
-  if(window.W2Auth?.role?.()!=='administrador')return toast('Somente administradores podem executar a migração.');
-  const source=dedupe((Array.isArray(window.INITIAL_DATA)?window.INITIAL_DATA:[]).map(enrichLegacy));
-  if(!source.length){status.textContent='A base histórica data.js não foi encontrada.';return}
-  btn.disabled=true;btn.textContent='Migrando…';
-  try{
-    const result=await W2DB.migrateHistorical(source,(done,total)=>{const pct=Math.round(done/total*100);bar.style.width=pct+'%';status.textContent=`Migrando ${num(done)} de ${num(total)} registros (${pct}%). Não feche esta página.`});
-    if(result.alreadyDone){bar.style.width='100%';status.textContent=`Migração já concluída • ${num(result.total)} registros no Supabase.`}
-    else{bar.style.width='100%';status.textContent=`Migração concluída • ${num(result.inserted)} novos • ${num(result.duplicates)} duplicados ignorados • ${num(result.after)} registros no Supabase.`}
-    btn.textContent='Migração concluída';
-    const remote=await W2DB.loadRemote();
-    base=remote.entregas.map(W2DB.toLocalEntrega);extra=[];data=dedupe(base);imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
-    populateFilters();render();renderHistory();toast('Base histórica migrada para o Supabase.');
-  }catch(e){console.error(e);status.textContent='Falha na migração: '+(e.message||e);btn.disabled=false;btn.textContent='Tentar novamente';btn.addEventListener('click',runHistoricalMigration,{once:true});toast('Falha ao migrar a base histórica.')}
-}
-function openTab(name){if(window.W2Auth&&!W2Auth.allowed(name)){toast('Seu perfil não possui acesso a esta área.');return}const page=$('#'+name);if(!page)return;$$('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));$$('.page').forEach(x=>x.classList.toggle('active',x.id===name));if(name==='pagamentos')renderPayments();if(name==='importacoes')renderHistory()}
-async function initApp(){
-  try{
-    if(window.W2Auth){const ok=await W2Auth.boot();if(!ok)return;}
-    if(!window.W2DB?.state?.authenticated)throw new Error('Sessão Supabase não autenticada. Faça login novamente.');
-    try{
-      const remote=await W2DB.loadRemote();
-      base=remote.entregas.map(W2DB.toLocalEntrega); extra=[]; data=dedupe(base);
-      payments=remote.pagamentos.map(W2DB.toLocalPayment);
-      imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
-    }catch(e){
-      console.error('W2: falha ao carregar dados do Supabase',e);
-      throw new Error('Não foi possível carregar a base do Supabase. Nenhum dado local foi usado. '+(e.message||e));
-    }
-    const nav=document.querySelector('nav');
-    if(nav) nav.addEventListener('click',e=>{const b=e.target.closest('.tab');if(b){e.preventDefault();openTab(b.dataset.tab)}});
-    $$('.filters select').forEach(x=>x.addEventListener('change',render));
-    $('#clearFilters')?.addEventListener('click',()=>{$('#fAno').value='';$$('#monthMenu input[type=checkbox]').forEach(o=>o.checked=false);updateMonthLabel();$('#fQuinzena').value='';$('#fCidade').value='';$('#fTamanho').value='';render()});
-    $('#cafSearch')?.addEventListener('input',searchCaf);
-    $('#btnUpload')?.addEventListener('click',()=>{openTab('importacoes');$('#fileInput')?.click()});
-    $('#drop')?.addEventListener('click',()=>$('#fileInput')?.click());
-    $('#fileInput')?.addEventListener('change',e=>e.target.files[0]&&handleFile(e.target.files[0]));
-    $('#drop')?.addEventListener('dragover',e=>e.preventDefault());
-    $('#drop')?.addEventListener('drop',e=>{e.preventDefault();e.dataTransfer.files[0]&&handleFile(e.dataTransfer.files[0])});
-    $('#monthToggle')?.addEventListener('click',e=>{e.stopPropagation();$('#monthMenu').classList.toggle('open');$('#monthToggle').classList.toggle('open')});
-    $('#monthMenu')?.addEventListener('click',e=>e.stopPropagation());
-    $('#monthMenu')?.addEventListener('change',e=>{if(e.target.matches('input[type=checkbox]')){updateMonthLabel();render()}});
-    document.addEventListener('click',e=>{if(e.target.closest('#monthAll')){$$('#monthMenu input[type=checkbox]').forEach(o=>o.checked=true);updateMonthLabel();render();return}if(e.target.closest('#monthNone')){$$('#monthMenu input[type=checkbox]').forEach(o=>o.checked=false);updateMonthLabel();render();return}if(!e.target.closest('#monthFilter')){$('#monthMenu')?.classList.remove('open');$('#monthToggle')?.classList.remove('open')}});
-    document.addEventListener('click',e=>{let b=e.target.closest('.pay-btn');if(b){e.preventDefault();return openPayment(b.dataset.city);}if(e.target.closest('#closePaymentModal'))return closePaymentModal();if(e.target.closest('#savePayment')){e.preventDefault();return registerPayment();}if(e.target.closest('#payFull'))return $('#mAmount').value=Number($('#mDebt').textContent.replace(/[^0-9,]/g,'').replace(',','.')).toFixed(2);if(e.target.closest('#paymentHistoryBtn')){let h=$('#paymentHistory');h.style.display=h.style.display==='none'?'block':'none';renderPaymentHistory()}});
-    $('#paymentModal')?.addEventListener('click',e=>{if(e.target===$('#paymentModal'))closePaymentModal()});['#mYear','#mMonth','#mQuin'].forEach(sel=>$(sel)?.addEventListener('change',refreshPaymentModal));
-    populateFilters();render();renderHistory();
-    console.info(`W2 V2.4.4 iniciado: ${data.length} AWBs carregados do Supabase.`);
-  }catch(err){console.error('W2 init error',err);const t=$('#toast');if(t){t.textContent='Falha ao iniciar: '+(err.message||err);t.style.display='block'}}
-}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initApp);else initApp();
+function renderPaymentHistory(){let box=$('#paymentHistory');if(!box)return;let list=payments.filter(x=>paymentMatchesFilters(x)).sort((a,b)=>(b.date||'').localeCompare(a.date||''));let rows=list.map(x=>`<tr><td>${x.date?x.date.split('-').reverse().join('/'):''}</td><td>${x.city}</td><td>${x.driver}</td><td>${x.quin}ª quinzena ${String(x.month).padStart(2,'0')}/${x.year}</td><td><b>${brl(x.amount)}</b></td><td>${x.note||'—'}</td><td><button class="danger-link" onclick="deletePayment(${x.id})">Excluir</button></td></tr>`);box.innerHTML=`<div class="history-title"><div><h3>Histórico de pagamentos</h3><p>${list.length} lançamento(s) no filtro atual.</p></div></div>`+(rows.length?table(['Data','Cidade','Entregador','Fechamento','Valor pago','Observação',''],rows):'<p>Nenhum pagamento registrado neste filtro.</p>')}
+function deletePayment(id){if(!confirm('Excluir este lançamento de pagamento?'))return;payments=payments.filter(x=>x.id!==id);savePayments();renderPayments();toast('Lançamento excluído.')}
+window.deletePayment=deletePayment;
+function searchCaf(){let q=$('#cafSearch').value.trim(),d=data.filter(r=>r.caf.includes(q));if(!q){$('#cafResult').innerHTML='';return}if(!d.length){$('#cafResult').innerHTML='<p>Nenhuma CAF encontrada.</p>';return}let exact=d.filter(r=>r.caf===q);if(exact.length)d=exact;let fat=d.reduce((s,r)=>s+(PRICES[r.tamanho]||0),0), cats={};d.forEach(r=>cats[r.tamanho]=(cats[r.tamanho]||0)+1);let summary=`<div class="cards"><article><label>CAF</label><strong>${d[0].caf}</strong><small>${d[0].cidade}/${d[0].uf}</small></article><article><label>AWBs</label><strong>${d.length}</strong><small>volumes</small></article><article><label>Faturamento</label><strong>${brl(fat)}</strong><small>estimado</small></article></div>`;let rows=d.slice(0,500).map(r=>`<tr><td>${r.awb}</td><td>${r.data}</td><td>${r.peso}</td><td>${r.tamanho}</td><td>${brl(PRICES[r.tamanho]||0)}</td></tr>`);$('#cafResult').innerHTML=summary+table(['AWB','Data','Peso','Categoria','Valor'],rows)}
+function normalizeRow(o){let get=(...ks)=>{for(let k of ks){let key=Object.keys(o).find(x=>x.toLowerCase().trim()===k);if(key)return o[key]}return''};let raw=get('dt_finalizada_caf_off','dt_finalizada_caf','data'), dt='';if(typeof raw==='number'){let x=XLSX.SSF.parse_date_code(raw);dt=`${x.y}-${String(x.m).padStart(2,'0')}-${String(x.d).padStart(2,'0')}`}else if(raw instanceof Date)dt=raw.toISOString().slice(0,10);else{let s=String(raw||'');let m=s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);dt=m?`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`:s.slice(0,10)}let peso=Number(String(get('peso')).replace(',','.'))||0;let tam=peso<=.02?'CARTÃO':peso<=3?'PEQUENO':peso<=10?'MÉDIO':'GRANDE';return{caf:String(get('cafid1','caf')||''),data:dt,entregues:Number(get('entregues'))||0,awb:String(get('awb1','awb')||''),peso,tamanho:tam,cidade:canonicalCity(get('cidade')),uf:String(get('uf')||'')}}
+function handleFile(file){let reader=new FileReader();reader.onload=e=>{try{let wb=XLSX.read(e.target.result,{type:'array',cellDates:true}),ws=wb.Sheets['CAF_Consolidado']||wb.Sheets[wb.SheetNames[0]],raw=XLSX.utils.sheet_to_json(ws,{defval:''}),incoming=raw.map(normalizeRow).filter(r=>r.awb&&r.caf);let existing=new Set(data.map(r=>r.caf+'|'+r.awb)),fresh=incoming.filter(r=>!existing.has(r.caf+'|'+r.awb)),dups=incoming.length-fresh.length,cafs=new Set(incoming.map(r=>r.caf)).size,cities=new Set(incoming.map(r=>r.cidade)).size,fat=incoming.reduce((s,r)=>s+(PRICES[r.tamanho]||0),0);$('#preview').innerHTML=`<div class="preview"><h3>${file.name}</h3><p><b>${incoming.length}</b> registros • <b>${cafs}</b> CAFs • <b>${cities}</b> cidades • ${brl(fat)}</p><p class="${dups?'warn':'ok'}">${dups} registros já existentes • ${fresh.length} novos registros</p><button id="confirmImport" ${fresh.length?'':'disabled'}>Confirmar importação</button></div>`;$('#confirmImport')?.addEventListener('click',()=>{data.push(...fresh);imports.unshift({arquivo:file.name,registros:fresh.length,status:'Importado'});
+populateFilters();render();renderHistory();$('#preview').innerHTML='';toast(`${fresh.length} registros importados com sucesso.`)})}catch(err){toast('Não foi possível ler a planilha. Verifique o formato.') }};reader.readAsArrayBuffer(file)}
+function renderHistory(){let rows=imports.map(x=>`<tr><td>${x.arquivo}</td><td>${x.registros}</td><td>${x.status}</td></tr>`);$('#history').innerHTML=table(['Arquivo','Novos registros','Status'],rows)}
+function toast(t){$('#toast').textContent=t;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',3000)}
+$$('.tab').forEach(b=>b.onclick=()=>{$$('.tab').forEach(x=>x.classList.remove('active'));$$('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active')});$$('.filters select').forEach(x=>x.onchange=render);$('#clearFilters').onclick=()=>{$$('.filters select').forEach(x=>x.value='');selectedMonths=[];renderMonthOptions();render()};$('#cafSearch').oninput=searchCaf;$('#btnUpload').onclick=()=>{$$('.tab').find(x=>x.dataset.tab==='importacoes').click();$('#fileInput').click()};$('#drop').onclick=()=>$('#fileInput').click();$('#fileInput').onchange=e=>e.target.files[0]&&handleFile(e.target.files[0]);$('#drop').ondragover=e=>e.preventDefault();$('#drop').ondrop=e=>{e.preventDefault();e.dataTransfer.files[0]&&handleFile(e.dataTransfer.files[0])};
+
+populateFilters();render();renderHistory();
+
+// Filtro de meses: seleção múltipla
+$('#monthFilterButton')?.addEventListener('click',e=>{e.stopPropagation();$('#monthFilterMenu').classList.toggle('open')});
+$('#monthOptions')?.addEventListener('change',e=>{if(!e.target.matches('input[type=checkbox]'))return;selectedMonths=[...$('#monthOptions').querySelectorAll('input:checked')].map(x=>Number(x.value)).sort((a,b)=>a-b);updateMonthLabel();render()});
+$('#selectAllMonths')?.addEventListener('click',e=>{e.preventDefault();selectedMonths=MONTH_NAMES.map((_,i)=>i+1);renderMonthOptions();render()});
+$('#clearMonths')?.addEventListener('click',e=>{e.preventDefault();selectedMonths=[];renderMonthOptions();render()});
+document.addEventListener('click',e=>{if(!e.target.closest('#monthFilter'))$('#monthFilterMenu')?.classList.remove('open')});
+
+// Pagamentos: listeners globais (funcionam mesmo após a tabela ser recriada pelos filtros)
+document.addEventListener('click',function(e){
+  const payButton=e.target.closest('.pay-btn');
+  if(payButton){e.preventDefault();if(!payButton.disabled)openPayment(payButton.dataset.city);return;}
+  if(e.target.closest('#closePaymentModal')){e.preventDefault();closePaymentModal();return;}
+  if(e.target.closest('#savePayment')){e.preventDefault();registerPayment();return;}
+  if(e.target.closest('#payFull')){e.preventDefault();if(!activePaymentCity)return;let d=filtered().filter(r=>(r.cidade||'NÃO INFORMADA')===activePaymentCity),debt=Math.max(0,d.length*deliveryRate(activePaymentCity)-paidFor(activePaymentCity));$('#mAmount').value=debt.toFixed(2);return;}
+  if(e.target.closest('#paymentHistoryBtn')){e.preventDefault();let h=$('#paymentHistory');h.style.display=h.style.display==='none'?'block':'none';renderPaymentHistory();return;}
+});
+$('#paymentModal').addEventListener('click',e=>{if(e.target===$('#paymentModal'))closePaymentModal()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#paymentModal').classList.contains('open'))closePaymentModal()});

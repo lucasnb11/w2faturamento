@@ -1,43 +1,32 @@
-(function(){
-  const A={user:null,profile:null};
-  const $=s=>document.querySelector(s);
-  function role(){return String(A.profile?.perfil||'operador').toLowerCase()}
-  function allowed(tab){const r=role();if(r==='administrador')return true;if(r==='financeiro')return !['cafs','cidades'].includes(tab);return ['dashboard','cafs','cidades'].includes(tab)}
-  function applyAccess(){
-    document.querySelectorAll('.tab').forEach(b=>b.hidden=!allowed(b.dataset.tab));
-    const canImport=['administrador','financeiro'].includes(role());
-    const up=$('#btnUpload'); if(up)up.hidden=!canImport;
-    document.body.dataset.role=role();
-    $('#userName') && ($('#userName').textContent=A.profile?.nome||A.user?.email||'Usuário');
-    $('#userRole') && ($('#userRole').textContent=role());
+(() => {
+  const cfg=window.W2_SUPABASE_CONFIG||{};
+  const screen=document.getElementById('authScreen'), setup=document.getElementById('authSetup');
+  const form=document.getElementById('loginForm'), msg=document.getElementById('loginMessage');
+  const emailInput=document.getElementById('loginEmail'), passInput=document.getElementById('loginPassword');
+  const userEmail=document.getElementById('userEmail'), logout=document.getElementById('logoutButton');
+  const configured=cfg.url&&cfg.anonKey&&!cfg.url.includes('COLE_AQUI')&&!cfg.anonKey.includes('COLE_AQUI');
+  let validating=false;
+  function setMessage(t,ok=false){if(!msg)return;msg.textContent=t||'';msg.className='auth-message '+(ok?'ok':'');}
+  function showLogin(){document.body.classList.add('auth-pending');document.body.classList.remove('auth-ok');screen.style.display='flex';if(userEmail)userEmail.textContent='';}
+  function showApp(session,perfil){document.body.classList.remove('auth-pending');document.body.classList.add('auth-ok');screen.style.display='none';if(userEmail)userEmail.textContent=(perfil?.nome||session?.user?.email||'Usuário')+(perfil?.perfil?' • '+perfil.perfil:'');window.W2_USER_PROFILE=perfil;}
+  if(!configured||!window.supabase){setup.hidden=false;form.querySelectorAll('input,button').forEach(x=>x.disabled=true);setMessage('Configure o Supabase para liberar o acesso.');return;}
+  const client=window.supabase.createClient(cfg.url,cfg.anonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+  window.w2Supabase=client;
+  async function authorize(session){
+    if(!session){showLogin();return false;}
+    if(validating)return false;
+    validating=true;
+    try{
+      const {data:perfil,error}=await client.from('perfis').select('id,nome,email,perfil,ativo,acesso_dashboard').eq('id',session.user.id).maybeSingle();
+      if(error){console.error('Falha ao consultar perfil:',error);await client.auth.signOut();showLogin();setMessage('Não foi possível validar seu perfil de acesso.');return false;}
+      if(!perfil){await client.auth.signOut();showLogin();setMessage('Usuário sem perfil cadastrado.');return false;}
+      if(perfil.ativo===false){await client.auth.signOut();showLogin();setMessage('Usuário desativado.');return false;}
+      if(perfil.acesso_dashboard!==true){await client.auth.signOut();showLogin();setMessage('Usuário sem acesso ao Dashboard CAF.');return false;}
+      showApp(session,perfil);setMessage('');return true;
+    } finally {validating=false;}
   }
-  async function profile(){
-    const c=window.W2DB?.state?.client;if(!c||!A.user)return null;
-    let {data,error}=await c.from('perfis_faturamento').select('*').eq('id',A.user.id).maybeSingle();
-    if(error)throw error;
-    A.profile=data||{id:A.user.id,email:A.user.email,nome:A.user.email,perfil:'operador',ativo:true};
-    if(A.profile.ativo===false)throw new Error('Usuário sem acesso ao Sistema de Faturamento.');
-    return A.profile;
-  }
-  async function boot(){
-    const st=await window.W2DB.init();
-    A.user=st.user;
-    if(!A.user){showLogin();return false}
-    try{await profile();hideLogin();applyAccess();return true}catch(e){showLogin(e.message);return false}
-  }
-  function showLogin(msg=''){$('#loginGate')?.classList.add('open');$('#loginError') && ($('#loginError').textContent=msg);}
-  function hideLogin(){$('#loginGate')?.classList.remove('open')}
-  async function login(){
-    const email=$('#loginEmail').value.trim(),password=$('#loginPassword').value;
-    $('#loginError').textContent='';
-    if(!email||!password)return $('#loginError').textContent='Informe e-mail e senha.';
-    const c=window.W2DB.state.client;if(!c)return $('#loginError').textContent='Supabase não configurado.';
-    const {data,error}=await c.auth.signInWithPassword({email,password});
-    if(error)return $('#loginError').textContent='Falha no login: '+error.message;
-    A.user=data.user;window.W2DB.state.user=A.user;window.W2DB.state.authenticated=true;
-    try{await profile();hideLogin();applyAccess();window.dispatchEvent(new CustomEvent('w2-auth-ready'));}catch(e){await c.auth.signOut();showLogin(e.message)}
-  }
-  async function logout(){const c=window.W2DB?.state?.client;if(c)await c.auth.signOut();location.reload()}
-  document.addEventListener('DOMContentLoaded',()=>{$('#loginBtn')?.addEventListener('click',login);$('#loginPassword')?.addEventListener('keydown',e=>e.key==='Enter'&&login());$('#logoutBtn')?.addEventListener('click',logout)});
-  window.W2Auth={A,boot,role,allowed,applyAccess};
+  client.auth.getSession().then(({data})=>authorize(data.session));
+  client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT')showLogin();else if(session)authorize(session);});
+  form.addEventListener('submit',async e=>{e.preventDefault();setMessage('Entrando...');const {data,error}=await client.auth.signInWithPassword({email:emailInput.value.trim(),password:passInput.value});if(error){setMessage('E-mail ou senha inválidos.');return;}passInput.value='';await authorize(data.session);});
+  logout.addEventListener('click',async()=>{await client.auth.signOut();showLogin();});
 })();
