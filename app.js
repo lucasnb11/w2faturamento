@@ -8,20 +8,38 @@ const STORAGE={payments:'w2_payments_v2',imports:'w2_imports_v2',extra:'w2_extra
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const brl=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}), num=v=>Number(v||0).toLocaleString('pt-BR');
 const norm=s=>String(s??'').trim(), upper=s=>norm(s).toLocaleUpperCase('pt-BR');
+function cityName(value){
+  const small=new Set(['de','da','do','das','dos','e']);
+  return norm(value).replace(/\s+/g,' ').toLocaleLowerCase('pt-BR').split(' ').map((word,i)=>
+    i&&small.has(word)?word:word.replace(/(^|[-'’])\p{L}/gu,part=>part.toLocaleUpperCase('pt-BR'))
+  ).join(' ');
+}
+function cityKey(value){return cityName(value).normalize('NFD').replace(/\p{M}/gu,'').toLocaleUpperCase('pt-BR')}
+function canonicalizeCities(rows){
+  const preferred=new Map();
+  for(const row of rows){
+    const name=cityName(row.cidade),key=cityKey(name);
+    const accents=(name.normalize('NFD').match(/\p{M}/gu)||[]).length;
+    if(!preferred.has(key)||accents>preferred.get(key).accents)preferred.set(key,{name,accents});
+  }
+  return rows.map(row=>({...row,cidade:preferred.get(cityKey(row.cidade)).name}));
+}
+function cityLabel(value){return data.find(row=>cityKey(row.cidade)===cityKey(value))?.cidade||cityName(value)}
+function toDisplayEntrega(row){const entrega=W2DB.toLocalEntrega(row);return {...entrega,cidade:cityName(entrega.cidade)}}
 function safeLoad(key){try{const raw=window.localStorage?localStorage.getItem(key):null;if(!raw)return[];const parsed=JSON.parse(raw);return Array.isArray(parsed)?parsed:[]}catch(err){console.warn('W2: armazenamento local inválido em',key,err);try{localStorage.removeItem(key)}catch(_){}return[]}}
 function safeSave(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true}catch(err){console.warn('W2: não foi possível salvar localmente',key,err);return false}}
 let base=[];
 let extra=[];
 let data=[], charts={}, imports=[];
-let payments=safeLoad(STORAGE.payments), activePaymentCity=null, pendingImport=null;
+let payments=safeLoad(STORAGE.payments).map(p=>({...p,city:cityName(p.city)})), activePaymentCity=null, pendingImport=null;
 function identifyType(awb){return BOX_PREFIXES.some(p=>upper(awb).startsWith(p))?'CAIXA':'CARTÃO'}
 function classify(awb,peso){if(identifyType(awb)==='CARTÃO')return'CARTÃO';peso=Number(peso)||0;return peso<=1?'PEQUENO':peso<=10?'MÉDIO':'GRANDE'}
 function deliveryRate(city,row){if(row&&identifyType(row.awb)==='CARTÃO')return 3;return SPECIAL_PAY_CITIES.has(upper(city))?8:5}
 function deliveryRateLabel(city,rows=[]){const rates=[...new Set(rows.map(r=>deliveryRate(city,r)))].sort((a,b)=>a-b);return rates.length===1?brl(rates[0]):rates.length?rates.map(brl).join(' / '):'—'}
 function parseDate(raw){if(!raw)return'';if(typeof raw==='number'&&window.XLSX){let x=XLSX.SSF.parse_date_code(raw);return x?`${x.y}-${String(x.m).padStart(2,'0')}-${String(x.d).padStart(2,'0')}`:''}if(raw instanceof Date&&!isNaN(raw))return raw.toISOString().slice(0,10);let s=String(raw);let m=s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);if(m)return`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;let iso=s.match(/(\d{4})-(\d{2})-(\d{2})/);return iso?iso[0]:''}
 function dateParts(s){let m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/);return m?{year:+m[1],month:+m[2],quin:+m[3]<=15?1:2}:{} }
-function enrichLegacy(r){let awb=norm(r.awb||r.awb1),peso=Number(r.peso||0),tipo=identifyType(awb),tamanho=classify(awb,peso);return{...r,caf:norm(r.caf||r.cafid1),awb,peso,tipo_item:tipo,tamanho,valor_unitario:PRICES[tamanho],data:parseDate(r.data||r.dt_finalizada_caf),cidade:norm(r.cidade),uf:norm(r.uf)}}
-function dedupe(rows){let seen=new Set();return rows.filter(r=>{let k=`${upper(r.caf)}|${upper(r.awb)}`;if(!r.caf||!r.awb||seen.has(k))return false;seen.add(k);return true})}
+function enrichLegacy(r){let awb=norm(r.awb||r.awb1),peso=Number(r.peso||0),tipo=identifyType(awb),tamanho=classify(awb,peso);return{...r,caf:norm(r.caf||r.cafid1),awb,peso,tipo_item:tipo,tamanho,valor_unitario:PRICES[tamanho],data:parseDate(r.data||r.dt_finalizada_caf),cidade:cityName(r.cidade),uf:norm(r.uf)}}
+function dedupe(rows){let seen=new Set();return canonicalizeCities(rows.filter(r=>{let k=`${upper(r.caf)}|${upper(r.awb)}`;if(!r.caf||!r.awb||seen.has(k))return false;seen.add(k);return true}))}
 function selectedMonths(){return $$('#monthMenu input[type=checkbox]:checked').map(o=>o.value)}
 function updateMonthLabel(){let m=selectedMonths(),names=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];$('#monthToggle').childNodes[0].nodeValue=!m.length?'Todos os meses ':m.length===1?names[Number(m[0])-1]+' ':m.length===12?'Todos os meses ':m.length+' meses selecionados '}
 function renderMonthMenu(){let names=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];$('#monthMenu').innerHTML=`<div class="month-actions"><button type="button" id="monthAll">Selecionar todos</button><button type="button" id="monthNone">Limpar</button></div>`+names.map((x,i)=>`<label class="month-option"><input type="checkbox" value="${i+1}"> <span>${x}</span></label>`).join('');updateMonthLabel()}
@@ -36,13 +54,13 @@ function selectedPeriod(){return{year:$('#fAno').value,months:selectedMonths(),q
 function periodReady(){let p=selectedPeriod();return p.year&&p.months.length===1&&p.quin}
 function periodLabel(){let p=selectedPeriod();return periodReady()?`${p.quin}ª quinzena ${String(p.months[0]).padStart(2,'0')}/${p.year}`:'período filtrado'}
 function paymentMatches(p){let s=selectedPeriod();return(!s.year||p.year==s.year)&&(!s.months.length||s.months.includes(String(p.month)))&&(!s.quin||p.quin==s.quin)}
-function paidFor(city){return payments.filter(p=>p.city===city&&paymentMatches(p)).reduce((s,p)=>s+Number(p.amount||0),0)}
+function paidFor(city){return payments.filter(p=>cityKey(p.city)===cityKey(city)&&paymentMatches(p)).reduce((s,p)=>s+Number(p.amount||0),0)}
 function renderPayments(d=filtered()){let m={};d.forEach(r=>{let c=r.cidade||'NÃO INFORMADA',x=m[c]??={cafs:new Set(),awb:0,due:0,rows:[]};x.cafs.add(r.caf);x.awb++;x.rows.push(r);x.due+=deliveryRate(c,r)});let due=Object.values(m).reduce((s,x)=>s+x.due,0),rev=d.reduce((s,r)=>s+PRICES[r.tamanho],0);$('#pAwb').textContent=num(d.length);$('#pCities').textContent=num(Object.keys(m).length);$('#pPay').textContent=brl(due);$('#pRevenue').textContent=brl(rev);$('#pMargin').textContent=brl(rev-due);let rows=Object.entries(m).sort((a,b)=>b[1].awb-a[1].awb).map(([c,x])=>{let paid=paidFor(c),debt=Math.max(0,x.due-paid),status=debt<=.005?'Pago':paid>0?'Parcial':'Pendente',cls=status.toLowerCase();return`<tr><td>${c}</td><td>${x.cafs.size}</td><td>${num(x.awb)}</td><td>${deliveryRateLabel(c,x.rows)}</td><td>${brl(x.due)}</td><td class="paid">${brl(paid)}</td><td class="debt">${brl(debt)}</td><td><span class="status-pill status-${cls}">${status}</span></td><td><button type="button" class="pay-btn" data-city="${c}">Registrar</button></td></tr>`});$('#paymentTable').innerHTML=table(['Cidade','CAFs','AWBs','Tarifa/AWB','Devido','Pago','Saldo','Status','Ação'],rows);renderPaymentHistory()}
 function paymentModalPeriod(){return{year:$('#mYear')?.value||'',month:$('#mMonth')?.value||'',quin:$('#mQuin')?.value||''}}
-function paymentRowsFor(city,p=paymentModalPeriod()){return data.filter(r=>{let dp=dateParts(r.data);return (r.cidade||'NÃO INFORMADA')===city&&(!p.year||String(dp.year)===String(p.year))&&(!p.month||String(dp.month)===String(p.month))&&(!p.quin||String(dp.quin)===String(p.quin))})}
-function paidForModal(city,p=paymentModalPeriod()){return payments.filter(x=>x.city===city&&String(x.year)===String(p.year)&&String(x.month)===String(p.month)&&String(x.quin)===String(p.quin)).reduce((s,x)=>s+Number(x.amount||0),0)}
+function paymentRowsFor(city,p=paymentModalPeriod()){return data.filter(r=>{let dp=dateParts(r.data);return cityKey(r.cidade||'NÃO INFORMADA')===cityKey(city)&&(!p.year||String(dp.year)===String(p.year))&&(!p.month||String(dp.month)===String(p.month))&&(!p.quin||String(dp.quin)===String(p.quin))})}
+function paidForModal(city,p=paymentModalPeriod()){return payments.filter(x=>cityKey(x.city)===cityKey(city)&&String(x.year)===String(p.year)&&String(x.month)===String(p.month)&&String(x.quin)===String(p.quin)).reduce((s,x)=>s+Number(x.amount||0),0)}
 function refreshPaymentModal(){if(!activePaymentCity)return;let p=paymentModalPeriod(),d=paymentRowsFor(activePaymentCity,p),due=d.reduce((s,r)=>s+deliveryRate(activePaymentCity,r),0),paid=(p.year&&p.month&&p.quin)?paidForModal(activePaymentCity,p):0,debt=Math.max(0,due-paid);$('#paymentContext').textContent=`${activePaymentCity} • ${p.year||'Ano'} / ${p.month||'Mês'} / ${p.quin?p.quin+'ª quinzena':'Quinzena'} • ${num(d.length)} AWBs • tarifas ${deliveryRateLabel(activePaymentCity,d)}/AWB`;$('#mDue').textContent=brl(due);$('#mPaid').textContent=brl(paid);$('#mDebt').textContent=brl(debt);$('#mAmount').value=(p.year&&p.month&&p.quin)?debt.toFixed(2):''}
-function openPayment(city){activePaymentCity=city;let years=[...new Set(data.map(r=>dateParts(r.data).year).filter(Boolean))].sort((a,b)=>b-a);$('#mYear').innerHTML='<option value="">Selecione</option>'+years.map(y=>`<option value="${y}">${y}</option>`).join('');$('#mMonth').innerHTML='<option value="">Selecione</option>'+Array.from({length:12},(_,i)=>`<option value="${i+1}">${String(i+1).padStart(2,'0')}</option>`).join('');let sp=selectedPeriod();if(sp.year)$('#mYear').value=sp.year;if(sp.months.length===1)$('#mMonth').value=sp.months[0];if(sp.quin)$('#mQuin').value=sp.quin;$('#mDate').value=new Date().toISOString().slice(0,10);$('#mDriver').value=payments.find(x=>x.city===city)?.driver||'';$('#mNote').value='';refreshPaymentModal();$('#paymentModal').classList.add('open')}
+function openPayment(city){activePaymentCity=city;let years=[...new Set(data.map(r=>dateParts(r.data).year).filter(Boolean))].sort((a,b)=>b-a);$('#mYear').innerHTML='<option value="">Selecione</option>'+years.map(y=>`<option value="${y}">${y}</option>`).join('');$('#mMonth').innerHTML='<option value="">Selecione</option>'+Array.from({length:12},(_,i)=>`<option value="${i+1}">${String(i+1).padStart(2,'0')}</option>`).join('');let sp=selectedPeriod();if(sp.year)$('#mYear').value=sp.year;if(sp.months.length===1)$('#mMonth').value=sp.months[0];if(sp.quin)$('#mQuin').value=sp.quin;$('#mDate').value=new Date().toISOString().slice(0,10);$('#mDriver').value=payments.find(x=>cityKey(x.city)===cityKey(city))?.driver||'';$('#mNote').value='';refreshPaymentModal();$('#paymentModal').classList.add('open')}
 function closePaymentModal(){$('#paymentModal').classList.remove('open');activePaymentCity=null}
 async function registerPayment(){
   if(!activePaymentCity)return toast('Selecione uma cidade para registrar o pagamento.');
@@ -75,12 +93,12 @@ async function registerPayment(){
     if(btn){btn.disabled=false;btn.textContent='Registrar pagamento'}
   }
 }
-function renderPaymentHistory(){let list=payments.filter(paymentMatches).sort((a,b)=>(b.date||'').localeCompare(a.date||''));$('#paymentHistory').innerHTML=list.length?table(['Data','Cidade','Entregador','Período','Valor','Observação',''],list.map(x=>`<tr><td>${x.date.split('-').reverse().join('/')}</td><td>${x.city}</td><td>${x.driver}</td><td>${x.quin}ª ${String(x.month).padStart(2,'0')}/${x.year}</td><td>${brl(x.amount)}</td><td>${x.note||'—'}</td><td><button class="danger-link" onclick="deletePayment(${x.id})">Excluir</button></td></tr>`)):'<p>Nenhum pagamento no filtro atual.</p>'}
+function renderPaymentHistory(){let list=payments.filter(paymentMatches).sort((a,b)=>(b.date||'').localeCompare(a.date||''));$('#paymentHistory').innerHTML=list.length?table(['Data','Cidade','Entregador','Período','Valor','Observação',''],list.map(x=>`<tr><td>${x.date.split('-').reverse().join('/')}</td><td>${cityLabel(x.city)}</td><td>${x.driver}</td><td>${x.quin}ª ${String(x.month).padStart(2,'0')}/${x.year}</td><td>${brl(x.amount)}</td><td>${x.note||'—'}</td><td><button class="danger-link" onclick="deletePayment(${x.id})">Excluir</button></td></tr>`)):'<p>Nenhum pagamento no filtro atual.</p>'}
 function deletePayment(id){if(confirm('Excluir este pagamento?')){payments=payments.filter(x=>x.id!==id);safeSave(STORAGE.payments,payments);render()}}window.deletePayment=deletePayment;
 function searchCaf(){let q=upper($('#cafSearch').value);if(!q)return $('#cafResult').innerHTML='';let d=data.filter(r=>upper(r.caf).includes(q));if(!d.length)return $('#cafResult').innerHTML='<p>Nenhuma CAF encontrada.</p>';let exact=d.filter(r=>upper(r.caf)===q);if(exact.length)d=exact;let fat=d.reduce((s,r)=>s+PRICES[r.tamanho],0);$('#cafResult').innerHTML=`<div class="cards"><article><label>CAF</label><strong>${d[0].caf}</strong><small>${d[0].cidade}/${d[0].uf}</small></article><article><label>AWBs</label><strong>${d.length}</strong></article><article><label>Faturamento</label><strong>${brl(fat)}</strong></article></div>`+table(['AWB','Tipo','Data','Peso','Categoria','Valor'],d.slice(0,500).map(r=>`<tr><td>${r.awb}</td><td>${r.tipo_item}</td><td>${r.data}</td><td>${r.peso}</td><td>${r.tamanho}</td><td>${brl(PRICES[r.tamanho])}</td></tr>`))}
 function getField(o,...names){let map=Object.fromEntries(Object.keys(o).map(k=>[upper(k),k]));for(let n of names){let k=map[upper(n)];if(k!==undefined)return o[k]}return''}
 function toNumber(v){if(typeof v==='number')return Number.isFinite(v)?v:0;let s=String(v??'').trim();if(!s)return 0;s=s.replace(/R\$\s?/gi,'').replace(/\s/g,'');if(s.includes(',')&&s.includes('.'))s=s.replace(/\./g,'').replace(',','.');else s=s.replace(',','.');let n=Number(s);return Number.isFinite(n)?n:0}
-function normalizeCAF(o){let awb=norm(getField(o,'awb1','awb')),peso=toNumber(getField(o,'peso'));let tamanho=classify(awb,peso);return{caf:norm(getField(o,'cafid1','caf')),data:parseDate(getField(o,'dt_finalizada_caf','dt_finalizada_caf_off','data')),data_abertura:parseDate(getField(o,'dt_abertura_caf')),entregues:toNumber(getField(o,'entregues')),awb,peso,peso_cliente:toNumber(getField(o,'peso_cliente')),tipo_item:identifyType(awb),tamanho,valor_unitario:PRICES[tamanho],motorista_id:norm(getField(o,'mot_id1')),motorista:norm(getField(o,'mot_nome1')),cnpj:norm(getField(o,'CNPJ')),razao_social:norm(getField(o,'motemp_razao_social')),placa:norm(getField(o,'vei_placa')),cidade:norm(getField(o,'cidade')),uf:norm(getField(o,'uf')),cliente:norm(getField(o,'nmfantasia')),tipo_produto:norm(getField(o,'ds_tipo_produto')),quinzena_original:norm(getField(o,'quinzena1')),modelo_pagamento:norm(getField(o,'ModeloPagamento'))}}
+function normalizeCAF(o){let awb=norm(getField(o,'awb1','awb')),peso=toNumber(getField(o,'peso'));let tamanho=classify(awb,peso);return{caf:norm(getField(o,'cafid1','caf')),data:parseDate(getField(o,'dt_finalizada_caf','dt_finalizada_caf_off','data')),data_abertura:parseDate(getField(o,'dt_abertura_caf')),entregues:toNumber(getField(o,'entregues')),awb,peso,peso_cliente:toNumber(getField(o,'peso_cliente')),tipo_item:identifyType(awb),tamanho,valor_unitario:PRICES[tamanho],motorista_id:norm(getField(o,'mot_id1')),motorista:norm(getField(o,'mot_nome1')),cnpj:norm(getField(o,'CNPJ')),razao_social:norm(getField(o,'motemp_razao_social')),placa:norm(getField(o,'vei_placa')),cidade:cityName(getField(o,'cidade')),uf:norm(getField(o,'uf')),cliente:norm(getField(o,'nmfantasia')),tipo_produto:norm(getField(o,'ds_tipo_produto')),quinzena_original:norm(getField(o,'quinzena1')),modelo_pagamento:norm(getField(o,'ModeloPagamento'))}}
 function findHeaderRow(ws,need,maxRows=12){let grid=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true,range:0});for(let i=0;i<Math.min(maxRows,grid.length);i++){let row=grid[i].map(upper);if(need.every(n=>row.includes(upper(n))))return i+1}return 1}
 function sheetJson(ws,headerRow=1){return XLSX.utils.sheet_to_json(ws,{range:headerRow-1,defval:'',raw:true})}
 function sumAP(ap,...names){return ap.reduce((s,r)=>s+toNumber(getField(r,...names)),0)}
@@ -120,7 +138,7 @@ function parseWorkbook(wb,file){
   let cafSheet=wb.Sheets['CAFS']||wb.Sheets['CAF_Consolidado'];if(!cafSheet)throw new Error('Aba CAFS não encontrada. O arquivo deve conter a aba CAFS.');
   let headerRow=findHeaderRow(cafSheet,['cafid1','awb1']);let raw=sheetJson(cafSheet,headerRow);if(!raw.length)throw new Error('A aba CAFS está vazia.');
   let keys=Object.keys(raw[0]).map(upper),required=['cafid1','awb1','peso','cidade'];let missing=required.filter(k=>!keys.includes(upper(k)));if(missing.length)throw new Error('Colunas obrigatórias ausentes na CAFS: '+missing.join(', '));
-  let normalized=raw.map(normalizeCAF).filter(r=>r.awb&&r.caf),inside=internalDedupe(normalized),incoming=inside.rows;
+  let normalized=raw.map(normalizeCAF).filter(r=>r.awb&&r.caf),inside=internalDedupe(normalized),incoming=canonicalizeCities([...data,...inside.rows]).slice(data.length);
   let ap=[],apHeader=0;if(wb.Sheets['APURACAO']){apHeader=findHeaderRow(wb.Sheets['APURACAO'],['Total Pagar'],15);ap=sheetJson(wb.Sheets['APURACAO'],apHeader)}
   let official=extractOfficial(ap),calc=incoming.reduce((s,r)=>s+Number(r.valor_unitario||0),0),reconciliation=buildReconciliation(ap,calc),difference=official?reconciliation.difference:null;
   return{incoming,ap,official,calc,difference,reconciliation,fileName:file.name,internalDuplicates:inside.dups,headerRow,apHeader}
@@ -142,7 +160,7 @@ async function confirmImport(){
   const btn=$('#confirmImport');if(btn){btn.disabled=true;btn.textContent='Importando…'}let p=pendingImport;
   try{
     await W2DB.saveImport({name:p.fileName,hash:p.hash,origin:'manual',duplicates:p.dups,found:p.found,calculated:p.calc,official:p.official,status:'concluido'},p.fresh);
-    const remote=await W2DB.loadRemote();base=remote.entregas.map(W2DB.toLocalEntrega);extra=[];data=dedupe(base);payments=remote.pagamentos.map(W2DB.toLocalPayment);imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
+    const remote=await W2DB.loadRemote();base=remote.entregas.map(toDisplayEntrega);extra=[];data=dedupe(base);payments=remote.pagamentos.map(x=>({...W2DB.toLocalPayment(x),city:cityName(x.cidade)}));imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
     pendingImport=null;populateFilters();render();renderHistory();$('#preview').innerHTML='<div class="preview ok"><b>Importação concluída e gravada no Supabase.</b></div>';toast('Importação concluída com sucesso.')
   }catch(e){console.error(e);if(btn){btn.disabled=false;btn.textContent='Tentar novamente'}toast('Falha ao gravar importação no Supabase: '+(e.message||e))}
 }
@@ -178,7 +196,7 @@ async function runHistoricalMigration(){
     else{bar.style.width='100%';status.textContent=`Migração concluída • ${num(result.inserted)} novos • ${num(result.duplicates)} duplicados ignorados • ${num(result.after)} registros no Supabase.`}
     btn.textContent='Migração concluída';
     const remote=await W2DB.loadRemote();
-    base=remote.entregas.map(W2DB.toLocalEntrega);extra=[];data=dedupe(base);imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
+    base=remote.entregas.map(toDisplayEntrega);extra=[];data=dedupe(base);imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
     populateFilters();render();renderHistory();toast('Base histórica migrada para o Supabase.');
   }catch(e){console.error(e);status.textContent='Falha na migração: '+(e.message||e);btn.disabled=false;btn.textContent='Tentar novamente';btn.addEventListener('click',runHistoricalMigration,{once:true});toast('Falha ao migrar a base histórica.')}
 }
@@ -189,8 +207,8 @@ async function initApp(){
     if(!window.W2DB?.state?.authenticated)throw new Error('Sessão Supabase não autenticada. Faça login novamente.');
     try{
       const remote=await W2DB.loadRemote();
-      base=remote.entregas.map(W2DB.toLocalEntrega); extra=[]; data=dedupe(base);
-      payments=remote.pagamentos.map(W2DB.toLocalPayment);
+      base=remote.entregas.map(toDisplayEntrega); extra=[]; data=dedupe(base);
+      payments=remote.pagamentos.map(x=>({...W2DB.toLocalPayment(x),city:cityName(x.cidade)}));
       imports=remote.importacoes.map(x=>({id:x.id,arquivo:x.arquivo_nome,registros:x.registros_novos,duplicados:x.duplicados,status:x.status,calculado:Number(x.total_calculado||0),oficial:Number(x.total_oficial||0),data:x.importado_em}));
     }catch(e){
       console.error('W2: falha ao carregar dados do Supabase',e);
