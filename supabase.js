@@ -75,6 +75,9 @@
   function toLocalEntrega(r){return {caf:r.caf_id,awb:r.awb,peso:Number(r.peso||0),peso_cliente:Number(r.peso_cliente||0),tipo_item:r.tipo_item,tamanho:r.categoria,valor_unitario:Number(r.valor_unitario||0),data:r.data_finalizacao||r.data_abertura||'',cidade:r.cidade||'',uf:r.uf||'',motorista:r.motorista||'',motorista_id:r.motorista_id||'',placa:r.placa||'',cliente:r.cliente||'',modelo_pagamento:r.modelo_pagamento||''}}
   function toLocalPayment(r){return {id:r.id,city:r.cidade,driver:r.entregador,year:r.ano,month:r.mes,quin:r.quinzena,amount:Number(r.valor||0),date:r.data_pagamento,note:r.observacao||'',createdAt:r.created_at}}
   async function savePayment(p){if(!state.client||!state.authenticated)return null;const row={cidade:p.city,entregador:p.driver,ano:+p.year,mes:+p.month,quinzena:+p.quin,valor:+p.amount,data_pagamento:p.date,observacao:p.note||null};const {data,error}=await state.client.from('pagamentos_entregadores').insert(row).select().single();if(error)throw error;return data}
+  async function loadNfseDrafts(){if(!state.client||!state.authenticated)throw new Error('Sessão Supabase não autenticada.');return fetchAll('nfse_rascunhos','id')}
+  async function saveNfseDraft(row){if(!state.client||!state.authenticated)throw new Error('Sessão Supabase não autenticada.');const query=row.id?state.client.from('nfse_rascunhos').update(row).eq('id',row.id):state.client.from('nfse_rascunhos').insert(row);const {data,error}=await query.select().single();if(error)throw error;return data}
+  async function deleteNfseDraft(id){if(!state.client||!state.authenticated)throw new Error('Sessão Supabase não autenticada.');const {error}=await state.client.from('nfse_rascunhos').delete().eq('id',id);if(error)throw error}
   async function saveImport(meta,rows){
     if(!state.client||!state.authenticated)throw new Error('Sessão Supabase não autenticada.');
     if(meta.hash){const q=await state.client.from('importacoes').select('id,arquivo_nome,status,importado_em').eq('arquivo_hash',meta.hash).eq('status','concluido').limit(1);if(q.error)throw q.error;if(q.data?.length)throw new Error('Este mesmo arquivo já foi importado em '+new Date(q.data[0].importado_em).toLocaleString('pt-BR')+'.');}
@@ -86,5 +89,5 @@
       const {data:done,error}=await state.client.from('importacoes').update({registros_novos:rows.length,status:meta.status||'concluido',erro:null}).eq('id',imp.id).select().single();if(error)throw error;return done;
     }catch(e){await state.client.from('importacoes').update({status:'erro',erro:String(e.message||e)}).eq('id',imp.id);throw e}
   }
-  window.W2DB={state,init,loadRemote,toLocalEntrega,toLocalPayment,savePayment,saveImport,countEntregas,migrationStatus,migrateHistorical};
+  window.W2DB={state,init,loadRemote,toLocalEntrega,toLocalPayment,savePayment,saveImport,loadNfseDrafts,saveNfseDraft,deleteNfseDraft,countEntregas,migrationStatus,migrateHistorical};
 })();

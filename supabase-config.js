@@ -1,5 +1,6 @@
-// W2 Dashboard - configuração pública do Supabase
-// Usa somente a URL pública e a publishable key do projeto.
+// W2 Sistema de Faturamento V2.1
+// Preencha com os dados de Settings > API do seu projeto Supabase.
+// A anon key pode ficar no frontend; a segurança é feita pelas políticas RLS.
 window.W2_SUPABASE_CONFIG = {
   url: 'https://bdmogkdnhvstcgfuxznz.supabase.co',
   anonKey: 'sb_publishable_ArqeMb6WS9NFlGt98D4WUQ_gKWhQM0b'
