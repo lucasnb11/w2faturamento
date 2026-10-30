@@ -19,8 +19,8 @@
       if(!client)throw new Error('Entre novamente no sistema.');
       const {data,error}=await client.auth.getSession();
       if(error||!data?.session?.access_token)throw new Error('Entre novamente no sistema.');
-      const response=await fetch(path,{method:'POST',mode:'same-origin',credentials:'omit',redirect:'error',cache:'no-store',
-        signal:controller.signal,headers:{'Content-Type':'application/json',Authorization:'Bearer '+data.session.access_token},body:JSON.stringify(body)});
+      const response=await fetch(path,{method:body===undefined?'GET':'POST',mode:'same-origin',credentials:'omit',redirect:'error',cache:'no-store',
+        signal:controller.signal,headers:{'Content-Type':'application/json',Authorization:'Bearer '+data.session.access_token},body:body===undefined?undefined:JSON.stringify(body)});
       if(!response.headers.get('content-type')?.includes('application/json'))throw new Error('Esta função ainda não está disponível nesta publicação.');
       const result=await response.json();
       if(!response.ok)throw new Error(result.message||'Não foi possível concluir a operação.');
@@ -66,13 +66,34 @@
       text(root,result.consulta_convenio_rota_confirmada?`Consulta municipal pela rota declarada no ADN: ${result.consulta_convenio_rota} · HTTP ${result.consulta_convenio_http??'sem resposta'}.`:'A rota de consulta do convênio municipal ainda não foi identificada na documentação do ADN.');
       if(Array.isArray(result.consulta_convenio_erro_codigos)&&result.consulta_convenio_erro_codigos.length)text(root,`Códigos retornados pela API municipal: ${result.consulta_convenio_erro_codigos.join(', ')}.`);
       text(root,result.contrato_recepcao_identificado?'Campo de recepção identificado na documentação retornada pela API.':'O contrato de recepção ainda não foi confirmado pela documentação da API.');
+      text(root,result.a1_prova_assinatura_local===true?'A1: assinatura de desafio aleatório conferida localmente. Este teste não assina DPS e não valida o perfil XMLDSig da API.':'A prova local de assinatura com o A1 ainda não foi confirmada.');
       text(root,'A habilitação do contribuinte, o perfil de assinatura, a numeração e a transmissão ainda precisam ser validados.');
     }catch(e){text(root,e.name==='AbortError'?'O diagnóstico excedeu o tempo de resposta. Nenhuma DPS foi enviada.':e.message)}
     finally{progress.textContent='Tentativa de conexão finalizada.';busy=false;if(button)button.disabled=false;root.scrollIntoView({behavior:'smooth',block:'start'})}
   }
+  async function preparation(){
+    if(busy)return;
+    const root=output();text(root,'Preparação da DPS · homologação','h3');
+    if(window.W2Auth?.role?.()!=='administrador'){text(root,'Entre como administrador para verificar a preparação.');return}
+    const button=document.getElementById('nfPreparationTest');
+    busy=true;if(button)button.disabled=true;
+    try{
+      const result=await requestJson('/api/nfse/integracao',undefined,50000);
+      if(result.ambiente!=='homologacao'||result.emissao_oficial_disponivel!==false||result.transmissao_disponivel!==false)throw new Error('Resposta de preparação inesperada.');
+      text(root,result.a1_dentro_validade?'A1 cadastrado e dentro da validade.':'Pendência: cadastre um A1 da W2 dentro da validade.');
+      const numbering=result.numeracao;
+      text(root,numbering?.numeracao_pronta===true?`Série de homologação: ${numbering.serie}. Próximo número: ${numbering.proximo_numero}. Nenhum número foi reservado nesta consulta.`:'Pendência: definir série própria de homologação entre 1 e 49.999 e conferir o próximo número livre.');
+      text(root,result.possui_rascunho===true?'Há rascunho salvo. Abra-o e use Validar integração para conferir os dados fiscais.':'Pendência: salve um rascunho da quinzena escolhida para homologação e confirme os dados fiscais.');
+      text(root,'A série 70.000 da nota de exemplo pertence ao emissor web e não será reutilizada pelo aplicativo.');
+      text(root,'O perfil XMLDSig e a habilitação ainda dependem de validação na API. Esta consulta não reserva números, não assina DPS e não emite notas.');
+    }catch(e){text(root,e.name==='AbortError'?'A consulta excedeu o tempo de resposta. Tente novamente.':e.message)}
+    finally{busy=false;if(button)button.disabled=false;root.scrollIntoView({behavior:'smooth',block:'start'})}
+  }
   function init(){
     const button=document.getElementById('nfConnectionTest');
     if(button&&!button.dataset.bound){button.dataset.bound='true';button.addEventListener('click',testConnection)}
+    const preparationButton=document.getElementById('nfPreparationTest');
+    if(preparationButton&&!preparationButton.dataset.bound){preparationButton.dataset.bound='true';preparationButton.addEventListener('click',preparation)}
   }
-  window.W2NfseIntegration={validate,testConnection,init};
+  window.W2NfseIntegration={validate,testConnection,preparation,init};
 })();

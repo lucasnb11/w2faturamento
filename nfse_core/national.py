@@ -16,6 +16,8 @@ import subprocess
 import sys
 
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.serialization import pkcs12
 
@@ -225,7 +227,9 @@ def inspect_contract(document):
 
 
 def diagnostic_worker(record, key):
-    context = tls_context(decrypt_material(record, key))
+    material = decrypt_material(record, key)
+    proof = prove_signing_key(material)
+    context = tls_context(material)
     document = None
     docs_status = None
     for path in DOCS:
@@ -251,8 +255,28 @@ def diagnostic_worker(record, key):
         'consulta_convenio_rota_confirmada': route is not None,
         'consulta_convenio_erro_codigos': error_codes(convenio) if status != 200 else [],
         'consulta_convenio_http': status, 'consulta_convenio_recebida': status == 200 and convenio is not None,
+        'a1_prova_assinatura_local': proof,
+        'perfil_assinatura_dps_validado': False,
         'transmitido': False, 'emissao_oficial_disponivel': False,
         'aviso': 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'}
+
+
+def prove_signing_key(material):
+    """Prova local sobre desafio aleatório, sem XML ou dados de prestação.
+
+    Não testa o perfil XMLDSig, a cadeia ICP-Brasil, revogação ou habilitação.
+    Nunca retorna o desafio, a assinatura ou o certificado.
+    """
+    private_key, certificate, _ = material
+    if not isinstance(private_key, rsa.RSAPrivateKey) or private_key.key_size < 2048:
+        return False
+    try:
+        challenge = b'W2-NFSe-prova-local-nao-fiscal-v1:' + os.urandom(32)
+        signature = private_key.sign(challenge, padding.PKCS1v15(), hashes.SHA256())
+        certificate.public_key().verify(signature, challenge, padding.PKCS1v15(), hashes.SHA256())
+        return True
+    except Exception:
+        return False
 
 
 def worker_environment():
@@ -298,7 +322,8 @@ def diagnose_connection(config):
         if result.returncode != 0 or not isinstance(data, dict) or data.get('transmitido') is not False or data.get('emissao_oficial_disponivel') is not False:
             raise _worker_failure('PROCESSO_RESPOSTA')
         allowed = ['ambiente','conexao_tls_respondeu','documentacao_http','contrato_recepcao_identificado','contrato_sha256','consulta_convenio_http','consulta_convenio_recebida','transmitido','emissao_oficial_disponivel',
-            'parametros_servico','parametros_documentacao_http','consulta_convenio_rota','consulta_convenio_rota_confirmada','consulta_convenio_erro_codigos']
+            'parametros_servico','parametros_documentacao_http','consulta_convenio_rota','consulta_convenio_rota_confirmada','consulta_convenio_erro_codigos',
+            'a1_prova_assinatura_local','perfil_assinatura_dps_validado']
         clean = {name: data.get(name) for name in allowed}
         clean['aviso'] = 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'
         return clean

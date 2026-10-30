@@ -50,11 +50,22 @@ class NationalTests(unittest.TestCase):
         with patch.object(national,'read_official',return_value=(200,swagger())) as read,patch.object(national,'read_parameters',side_effect=[(200,parameters_swagger()),(200,response)]) as parameters:
             result=national.diagnostic_worker(self.record,self.key)
         self.assertTrue(result['contrato_recepcao_identificado'])
+        self.assertTrue(result['a1_prova_assinatura_local'])
+        self.assertFalse(result['perfil_assinatura_dps_validado'])
         self.assertFalse(result['transmitido'])
         self.assertNotIn('private-data-not-for-output',str(result))
         self.assertEqual([x.args[1] for x in read.call_args_list],[national.DOCS[0]])
         self.assertEqual([x.args[1] for x in parameters.call_args_list],[national.DOCS[0],national.CONVENIO])
         self.assertTrue(result['consulta_convenio_rota_confirmada'])
+
+    def test_key_proof_is_local_and_uses_fresh_non_fiscal_challenge(self):
+        material=national.decrypt_material(self.record,self.key)
+        with patch.object(national.os,'urandom',wraps=os.urandom) as random:
+            self.assertTrue(national.prove_signing_key(material))
+            self.assertTrue(national.prove_signing_key(material))
+        self.assertEqual(random.call_args_list,[((32,),),((32,),)])
+        other=national.decrypt_material(validate_and_encrypt(create_a1(),self.key),self.key)
+        self.assertFalse(national.prove_signing_key((material[0],other[1],[])))
 
     def test_parameters_route_is_declared_unique_and_needs_no_extra_query(self):
         doc=parameters_swagger()

@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-async function scenario(role,action='validate'){
+async function scenario(role,action='validate',prepared=false){
   const elements=new Map();
   class Element{
     constructor(tag){this.tag=tag;this.children=[];this.textContent='';this.dataset={}}
@@ -14,17 +14,20 @@ async function scenario(role,action='validate'){
   }
   elements.set('nfRecords',new Element('div'));
   elements.set('nfConnectionTest',new Element('button'));
+  elements.set('nfPreparationTest',new Element('button'));
   const calls=[];
   const context={document:{getElementById:id=>elements.get(id),createElement:tag=>new Element(tag)},
     location:{protocol:'https:'},AbortController,setTimeout,clearTimeout,
     window:{W2Auth:{role:()=>role},W2DB:{state:{client:{auth:{getSession:async()=>({data:{session:{access_token:'test-token'}}})}}}}},
     fetch:async(url,options)=>{calls.push({url,options});return{ok:true,headers:{get:()=> 'application/json'},json:async()=>({
       transmitido:false,emissao_oficial_disponivel:false,xsd_valido:false,a1_dentro_validade:true,
+      transmissao_disponivel:false,a1_prova_assinatura_local:true,possui_rascunho:prepared,numeracao:{numeracao_pronta:prepared,serie:1,proximo_numero:'23'},
       ambiente:'homologacao',documentacao_http:200,consulta_convenio_http:200,contrato_recepcao_identificado:true,
       aviso:'Nenhuma DPS transmitida.',pendencias:[{mensagem:'<img src=x onerror=alert(1)>'}]
     })}}};
   vm.createContext(context);vm.runInContext(fs.readFileSync('nfse-integracao.js','utf8'),context);
-  if(action==='connection')await context.window.W2NfseIntegration.testConnection();
+  if(action==='preparation')await context.window.W2NfseIntegration.preparation();
+  else if(action==='connection')await context.window.W2NfseIntegration.testConnection();
   else await context.window.W2NfseIntegration.validate({id:3,updated_at:'version-1',referencia:'1QMAIO26',dados_fiscais:{cliente:'não enviar'}});
   return {calls,elements};
 }
@@ -43,5 +46,13 @@ async function scenario(role,action='validate'){
   assert.equal(connection.calls[0].options.redirect,'error');
   assert.equal(connection.elements.get('nfConnectionTest').disabled,false);
   assert.equal((await scenario('financeiro','connection')).calls.length,0);
+  const pending=await scenario('administrador','preparation');
+  assert.equal(pending.calls[0].options.method,'GET');
+  assert.equal(pending.calls[0].options.body,undefined);
+  assert.ok(pending.elements.get('nfIntegrationResult').children.some(el=>el.textContent.includes('salve um rascunho')));
+  const prepared=await scenario('administrador','preparation',true);
+  assert.ok(prepared.elements.get('nfIntegrationResult').children.some(el=>el.textContent.includes('Próximo número: 23')));
+  assert.equal(prepared.elements.get('nfPreparationTest').disabled,false);
+  assert.equal((await scenario('financeiro','preparation')).calls.length,0);
   console.log('OK: validação envia somente versão do rascunho, exige administrador e trata mensagens como texto.');
 })().catch(e=>{console.error(e);process.exitCode=1});
