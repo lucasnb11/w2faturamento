@@ -5,6 +5,10 @@
     "api/nfse/integracao.py": {
       "maxDuration": 60,
       "includeFiles": "{nfse_core/**,api/nfse/certificado.py}"
+    },
+    "api/nfse/conexao.py": {
+      "maxDuration": 60,
+      "includeFiles": "{nfse_core/**,api/nfse/certificado.py,api/nfse/integracao.py}"
     }
   }
 }
