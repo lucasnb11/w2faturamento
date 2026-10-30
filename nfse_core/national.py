@@ -9,6 +9,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 from pathlib import Path
 import ssl
 import subprocess
@@ -24,6 +25,8 @@ HOST = 'sefin.producaorestrita.nfse.gov.br'
 BASE = '/API/SefinNacional'
 DOCS = ('/swagger/v1/swagger.json', '/swagger/docs/v1', '/docs/v1/swagger.json')
 CONVENIO = '/parametros_municipais/1500800/convenio'
+PARAM_HOST = 'adn.producaorestrita.nfse.gov.br'
+PARAM_BASE = '/parametrizacao'
 MAX_RESPONSE = 1024 * 1024
 ERRORS = {
     'A1_ABERTURA': 'Não foi possível abrir o A1 cadastrado. Confira sua validade e a proteção do servidor.',
@@ -93,20 +96,25 @@ def tls_context(material):
     return context
 
 
-def read_official(context, path):
-    if path not in (*DOCS, CONVENIO):
+def _read_service(context, path, service):
+    if service not in ('sefin', 'parametros'):
+        raise NationalError('Serviço fora do escopo do diagnóstico.')
+    parameter_path = (isinstance(path, str) and bool(re.fullmatch(r'/[A-Za-z0-9_/-]{1,180}', path))
+        and '//' not in path and bool(re.search(r'(^|/)1500800(/|$)', path))
+        and any(word in path.lower() for word in ('municip', 'conven')))
+    if path not in DOCS and not (service == 'parametros' and parameter_path):
         raise NationalError('Consulta fora do escopo do diagnóstico.')
-    connection = http.client.HTTPSConnection(HOST, timeout=6, context=context)
+    host, prefix = (HOST, BASE) if service == 'sefin' else (PARAM_HOST, PARAM_BASE)
+    connection = http.client.HTTPSConnection(host, timeout=6, context=context)
     try:
-        connection.request('GET', BASE + path, headers={'Accept': 'application/json', 'User-Agent': 'W2-NFSe-Homologacao/2.9'})
+        full_path = path if path.startswith(prefix + '/') else prefix + path
+        connection.request('GET', full_path, headers={'Accept': 'application/json', 'User-Agent': 'W2-NFSe-Homologacao/2.9.2'})
         response = connection.getresponse()
         if response.status in (301, 302, 303, 307, 308):
             raise NationalError(ERRORS['API_REDIRECIONAMENTO'], 'API_REDIRECIONAMENTO')
         body = response.read(MAX_RESPONSE + 1)
         if len(body) > MAX_RESPONSE:
             raise NationalError(ERRORS['API_RESPOSTA_GRANDE'], 'API_RESPOSTA_GRANDE')
-        if response.status != 200:
-            return response.status, None
         try:
             result = json.loads(body)
             return response.status, result if isinstance(result, dict) else None
@@ -118,6 +126,73 @@ def read_official(context, path):
         raise NationalError(ERRORS['API_CONEXAO_TLS'], 'API_CONEXAO_TLS') from None
     finally:
         connection.close()
+
+
+def read_official(context, path):
+    return _read_service(context, path, 'sefin')
+
+
+def read_parameters(context, path):
+    return _read_service(context, path, 'parametros')
+
+
+def parameter_endpoint(document):
+    """Escolhe somente GET de convênio municipal declarado no Swagger oficial."""
+    candidates = []
+    paths = document.get('paths', {})
+    if not isinstance(paths, dict):
+        return None
+    for template, operations in paths.items():
+        if not isinstance(template, str) or not isinstance(operations, dict):
+            continue
+        operation = operations.get('get')
+        if not isinstance(operation, dict) or operation.get('deprecated') is True:
+            continue
+        names = re.findall(r'\{([A-Za-z][A-Za-z0-9_]*)\}', template)
+        semantic = (template + ' ' + str(operation.get('summary', ''))).lower()
+        if len(names) != 1 or 'municip' not in semantic or 'conv' not in semantic:
+            continue
+        shared, specific = operations.get('parameters', []), operation.get('parameters', [])
+        if not isinstance(shared, list) or not isinstance(specific, list):
+            continue
+        parameters = []
+        for parameter in shared + specific:
+            for _ in range(6):
+                if not isinstance(parameter, dict) or '$ref' not in parameter:
+                    break
+                ref = parameter.get('$ref')
+                if not isinstance(ref, str) or not ref.startswith('#/'):
+                    parameter = None
+                    break
+                parameter = document
+                for name in ref[2:].split('/'):
+                    parameter = parameter.get(name.replace('~1', '/').replace('~0', '~')) if isinstance(parameter, dict) else None
+            parameters.append(parameter)
+        if any(not isinstance(p, dict) or '$ref' in p or (p.get('in') == 'query' and p.get('required') is True) for p in parameters):
+            continue
+        path = template.replace('{' + names[0] + '}', '1500800')
+        if not re.fullmatch(r'/[A-Za-z0-9_/-]{1,180}', path) or '//' in path:
+            continue
+        if not re.search(r'(^|/)1500800(/|$)', path) or not any(w in path.lower() for w in ('municip', 'conven')):
+            continue
+        candidates.append(path)
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def error_codes(response):
+    """Somente códigos curtos; não devolver descrições ou respostas brutas."""
+    if not isinstance(response, dict):
+        return []
+    items = response.get('erros', response.get('Erros', []))
+    if not isinstance(items, list):
+        return []
+    codes = []
+    for item in items[:5]:
+        if isinstance(item, dict):
+            code = item.get('codigo', item.get('Codigo'))
+            if isinstance(code, str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,40}', code):
+                codes.append(code)
+    return codes
 
 
 def inspect_contract(document):
@@ -155,14 +230,27 @@ def diagnostic_worker(record, key):
     docs_status = None
     for path in DOCS:
         docs_status, candidate = read_official(context, path)
-        if candidate and ('openapi' in candidate or 'swagger' in candidate):
+        if docs_status == 200 and candidate and ('openapi' in candidate or 'swagger' in candidate):
             document = candidate
             break
-    status, convenio = read_official(context, CONVENIO)
+    parameters_document = None
+    parameters_docs_status = None
+    for path in DOCS:
+        parameters_docs_status, candidate = read_parameters(context, path)
+        if parameters_docs_status == 200 and candidate and ('openapi' in candidate or 'swagger' in candidate):
+            parameters_document = candidate
+            break
+    route = parameter_endpoint(parameters_document) if parameters_document else None
+    status, convenio = read_parameters(context, route) if route else (None, None)
     return {'ambiente': 'homologacao', 'conexao_tls_respondeu': True,
         'documentacao_http': docs_status, 'contrato_recepcao_identificado': bool(document and inspect_contract(document)),
         'contrato_sha256': hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':')).encode()).hexdigest() if document else None,
-        'consulta_convenio_http': status, 'consulta_convenio_recebida': convenio is not None,
+        'parametros_servico': 'ADN · Parametrização',
+        'parametros_documentacao_http': parameters_docs_status,
+        'consulta_convenio_rota': route,
+        'consulta_convenio_rota_confirmada': route is not None,
+        'consulta_convenio_erro_codigos': error_codes(convenio) if status != 200 else [],
+        'consulta_convenio_http': status, 'consulta_convenio_recebida': status == 200 and convenio is not None,
         'transmitido': False, 'emissao_oficial_disponivel': False,
         'aviso': 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'}
 
@@ -209,7 +297,8 @@ def diagnose_connection(config):
             raise _worker_failure(data.get('erro_codigo'))
         if result.returncode != 0 or not isinstance(data, dict) or data.get('transmitido') is not False or data.get('emissao_oficial_disponivel') is not False:
             raise _worker_failure('PROCESSO_RESPOSTA')
-        allowed = ['ambiente','conexao_tls_respondeu','documentacao_http','contrato_recepcao_identificado','contrato_sha256','consulta_convenio_http','consulta_convenio_recebida','transmitido','emissao_oficial_disponivel']
+        allowed = ['ambiente','conexao_tls_respondeu','documentacao_http','contrato_recepcao_identificado','contrato_sha256','consulta_convenio_http','consulta_convenio_recebida','transmitido','emissao_oficial_disponivel',
+            'parametros_servico','parametros_documentacao_http','consulta_convenio_rota','consulta_convenio_rota_confirmada','consulta_convenio_erro_codigos']
         clean = {name: data.get(name) for name in allowed}
         clean['aviso'] = 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'
         return clean

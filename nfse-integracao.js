@@ -62,7 +62,9 @@
       const result=await requestJson('/api/nfse/conexao',{acao:'testar_conexao'},50000);
       if(result.transmitido!==false||result.emissao_oficial_disponivel!==false||result.ambiente!=='homologacao')throw new Error('Resposta de diagnóstico inesperada.');
       text(root,result.aviso);
-      text(root,`Documentação da API: HTTP ${result.documentacao_http??'sem resposta'}. Parâmetros municipais: HTTP ${result.consulta_convenio_http??'sem resposta'}.`);
+      text(root,`Documentação da Sefin: HTTP ${result.documentacao_http??'sem resposta'}. Documentação de parâmetros do ADN: HTTP ${result.parametros_documentacao_http??'sem resposta'}.`);
+      text(root,result.consulta_convenio_rota_confirmada?`Consulta municipal pela rota declarada no ADN: ${result.consulta_convenio_rota} · HTTP ${result.consulta_convenio_http??'sem resposta'}.`:'A rota de consulta do convênio municipal ainda não foi identificada na documentação do ADN.');
+      if(Array.isArray(result.consulta_convenio_erro_codigos)&&result.consulta_convenio_erro_codigos.length)text(root,`Códigos retornados pela API municipal: ${result.consulta_convenio_erro_codigos.join(', ')}.`);
       text(root,result.contrato_recepcao_identificado?'Campo de recepção identificado na documentação retornada pela API.':'O contrato de recepção ainda não foi confirmado pela documentação da API.');
       text(root,'A habilitação do contribuinte, o perfil de assinatura, a numeração e a transmissão ainda precisam ser validados.');
     }catch(e){text(root,e.name==='AbortError'?'O diagnóstico excedeu o tempo de resposta. Nenhuma DPS foi enviada.':e.message)}
