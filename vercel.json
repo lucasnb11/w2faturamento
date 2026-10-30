@@ -4,7 +4,7 @@
     "api/nfse/certificado.py": {"maxDuration": 60},
     "api/nfse/integracao.py": {
       "maxDuration": 60,
-      "includeFiles": ["nfse_core/**", "api/nfse/certificado.py"]
+      "includeFiles": "{nfse_core/**,api/nfse/certificado.py}"
     }
   }
 }
