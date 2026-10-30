@@ -20,6 +20,10 @@ def swagger():
         'components':{'schemas':{'DPS':{'type':'object','required':['dpsXmlGZipB64'],'properties':{'dpsXmlGZipB64':{'type':'string'}}}}}}
 
 
+def parameters_swagger():
+    return {'openapi':'3.0.1','paths':{'/parametros_municipais/{codigoMunicipio}/convenio':{'get':{'parameters':[{'name':'codigoMunicipio','in':'path','required':True}]}}}}
+
+
 class NationalTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -43,20 +47,67 @@ class NationalTests(unittest.TestCase):
         self.assertFalse(national.inspect_contract(changed))
     def test_diagnostic_only_reads_and_never_returns_raw_response(self):
         response={'cnpj':'private-data-not-for-output','convenio':'test'}
-        with patch.object(national,'read_official',side_effect=[(200,swagger()),(200,response)]) as read:
+        with patch.object(national,'read_official',return_value=(200,swagger())) as read,patch.object(national,'read_parameters',side_effect=[(200,parameters_swagger()),(200,response)]) as parameters:
             result=national.diagnostic_worker(self.record,self.key)
         self.assertTrue(result['contrato_recepcao_identificado'])
         self.assertFalse(result['transmitido'])
         self.assertNotIn('private-data-not-for-output',str(result))
-        self.assertEqual([x.args[1] for x in read.call_args_list],[national.DOCS[0],national.CONVENIO])
+        self.assertEqual([x.args[1] for x in read.call_args_list],[national.DOCS[0]])
+        self.assertEqual([x.args[1] for x in parameters.call_args_list],[national.DOCS[0],national.CONVENIO])
+        self.assertTrue(result['consulta_convenio_rota_confirmada'])
+
+    def test_parameters_route_is_declared_unique_and_needs_no_extra_query(self):
+        doc=parameters_swagger()
+        self.assertEqual(national.parameter_endpoint(doc),national.CONVENIO)
+        doc['paths']['/parametros_municipais/{codigoMunicipio}/convenio']['get']['parameters'].append({'name':'cnpj','in':'query','required':True})
+        self.assertIsNone(national.parameter_endpoint(doc))
+        doc=parameters_swagger()
+        doc['paths']['/municipios/{codigoMunicipio}/convenio']={'get':{}}
+        self.assertIsNone(national.parameter_endpoint(doc))
+        for path in ['https://evil.example/municipios/{codigoMunicipio}/convenio','//evil.example/municipios/{codigoMunicipio}/convenio','/municipios/{codigoMunicipio}/convenio?url=x','/municipios/{codigoMunicipio}/convenio/{cnpj}']:
+            self.assertIsNone(national.parameter_endpoint({'paths':{path:{'get':{}}}}))
+
+    def test_parameters_supports_local_reference_not_external_reference(self):
+        doc=parameters_swagger()
+        doc['components']={'parameters':{'municipio':{'name':'codigoMunicipio','in':'path','required':True}}}
+        params=doc['paths']['/parametros_municipais/{codigoMunicipio}/convenio']['get']
+        params['parameters']=[{'$ref':'#/components/parameters/municipio'}]
+        self.assertEqual(national.parameter_endpoint(doc),national.CONVENIO)
+        params['parameters']=[{'$ref':'https://evil.example/parameter'}]
+        self.assertIsNone(national.parameter_endpoint(doc))
+
+    def test_parameters_use_adn_and_preserve_only_error_codes(self):
+        document={'erros':[{'codigo':'E1234','descricao':'private-content'}]}
+        response=types.SimpleNamespace(status=404,read=lambda n:json.dumps(document).encode())
+        calls=[]
+        connection=types.SimpleNamespace(request=lambda *a,**k:calls.append(a),getresponse=lambda:response,close=lambda:None)
+        with patch.object(national.http.client,'HTTPSConnection',return_value=connection) as constructor:
+            status,body=national.read_parameters(ssl.create_default_context(),national.CONVENIO)
+            self.assertEqual(constructor.call_args.args[0],national.PARAM_HOST)
+            self.assertEqual(calls[0][:2],('GET',national.PARAM_BASE+national.CONVENIO))
+        self.assertEqual(status,404)
+        self.assertEqual(national.error_codes(body),['E1234'])
+        with patch.object(national,'read_official',return_value=(200,swagger())),patch.object(national,'read_parameters',side_effect=[(200,parameters_swagger()),(404,body)]):
+            result=national.diagnostic_worker(self.record,self.key)
+        self.assertFalse(result['consulta_convenio_recebida'])
+        self.assertEqual(result['consulta_convenio_erro_codigos'],['E1234'])
+        self.assertNotIn('private-content',str(result))
+
+    def test_parameters_documentation_failure_does_not_guess_route(self):
+        with patch.object(national,'read_official',return_value=(200,swagger())),patch.object(national,'read_parameters',return_value=(404,None)) as read:
+            result=national.diagnostic_worker(self.record,self.key)
+        self.assertEqual(len(read.call_args_list),len(national.DOCS))
+        self.assertIsNone(result['consulta_convenio_http'])
+        self.assertFalse(result['consulta_convenio_rota_confirmada'])
+        self.assertIsNone(result['consulta_convenio_rota'])
     def test_egress_is_fixed_get_and_does_not_redirect(self):
         response=types.SimpleNamespace(status=302,read=lambda n:b'')
         connection=types.SimpleNamespace(request=lambda *a,**k:None,getresponse=lambda:response,close=lambda:None)
         with patch.object(national.http.client,'HTTPSConnection',return_value=connection) as constructor:
-            with self.assertRaises(national.NationalError):national.read_official(ssl.create_default_context(),national.CONVENIO)
+            with self.assertRaises(national.NationalError):national.read_official(ssl.create_default_context(),national.DOCS[0])
             self.assertEqual(constructor.call_args.args[0],national.HOST)
         with patch.object(national.http.client,'HTTPSConnection') as constructor:
-            for path in ['https://evil.example','/nfse','/../../nfse','/dps/1','/parametros_municipais/9999999/convenio']:
+            for path in ['https://evil.example','/nfse','/../../nfse','/dps/1',national.CONVENIO,'/parametros_municipais/9999999/convenio']:
                 with self.assertRaises(national.NationalError):national.read_official(None,path)
             constructor.assert_not_called()
     def test_worker_timeout_and_secret_environment_is_not_inherited(self):
@@ -96,9 +147,9 @@ import http.client,json,runpy,sys
 class Response:
     status=200
     def read(self,limit):
-        return json.dumps({'openapi':'3.0.1','paths':{'/nfse':{'post':{'requestBody':{'content':{'application/json':{'schema':{'type':'object','required':['dpsXmlGZipB64'],'properties':{'dpsXmlGZipB64':{'type':'string'}}}}}}}}}}).encode()
+        return json.dumps({'openapi':'3.0.1','paths':{'/nfse':{'post':{'requestBody':{'content':{'application/json':{'schema':{'type':'object','required':['dpsXmlGZipB64'],'properties':{'dpsXmlGZipB64':{'type':'string'}}}}}}}},'/parametros_municipais/{codigoMunicipio}/convenio':{'get':{}}}}).encode()
 class Connection:
-    def __init__(self,host,**kwargs): assert host=='sefin.producaorestrita.nfse.gov.br'
+    def __init__(self,host,**kwargs): assert host in ['sefin.producaorestrita.nfse.gov.br','adn.producaorestrita.nfse.gov.br']
     def request(self,method,path,**kwargs): assert method=='GET'
     def getresponse(self): return Response()
     def close(self): pass
