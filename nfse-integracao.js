@@ -57,7 +57,7 @@
     if(window.W2Auth?.role?.()!=='administrador'){text(root,'Entre como administrador para testar a conexão.');return}
     const button=document.getElementById('nfConnectionTest');
     busy=true;if(button)button.disabled=true;
-    text(root,'Testando o A1 cadastrado no servidor. A consulta não emite notas. Aguarde até 50 segundos.');
+    const progress=text(root,'Testando o A1 cadastrado no servidor. A consulta não emite notas. Aguarde até 50 segundos.');
     try{
       const result=await requestJson('/api/nfse/conexao',{acao:'testar_conexao'},50000);
       if(result.transmitido!==false||result.emissao_oficial_disponivel!==false||result.ambiente!=='homologacao')throw new Error('Resposta de diagnóstico inesperada.');
@@ -66,7 +66,7 @@
       text(root,result.contrato_recepcao_identificado?'Campo de recepção identificado na documentação retornada pela API.':'O contrato de recepção ainda não foi confirmado pela documentação da API.');
       text(root,'A habilitação do contribuinte, o perfil de assinatura, a numeração e a transmissão ainda precisam ser validados.');
     }catch(e){text(root,e.name==='AbortError'?'O diagnóstico excedeu o tempo de resposta. Nenhuma DPS foi enviada.':e.message)}
-    finally{busy=false;if(button)button.disabled=false;root.scrollIntoView({behavior:'smooth',block:'start'})}
+    finally{progress.textContent='Tentativa de conexão finalizada.';busy=false;if(button)button.disabled=false;root.scrollIntoView({behavior:'smooth',block:'start'})}
   }
   function init(){
     const button=document.getElementById('nfConnectionTest');

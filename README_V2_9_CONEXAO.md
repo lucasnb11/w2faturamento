@@ -34,3 +34,11 @@ node tests/test_a1_frontend.cjs
 ```
 
 Os testes locais usam A1s sintéticos. O diagnóstico com o A1 real exige a ação do administrador no site. Depois dele, ainda é necessário conferir o contrato detalhado da API e o perfil de assinatura aceito, configurar uma série própria, ligar reserva/assinatura/transmissão/reconciliação, conciliar notas já emitidas e armazenar os XMLs autorizados privadamente antes de liberar emissão oficial. A confirmação de transporte aquático foi registrada; os códigos do contrato permanecem os informados pelo usuário.
+
+## Correção 2.9.1 do processo de diagnóstico
+
+Após o primeiro teste autenticado retornar HTTP 503, foi encontrada uma lacuna na inicialização do processo: o PYTHONPATH do worker continha somente a raiz do projeto. Agora ele preserva os caminhos de dependências já carregados em sys.path pelo runtime, sem herdar as variáveis secretas do Supabase.
+
+Foi acrescentado um teste que reproduz a perda de uma dependência carregada por diretório do runtime e confirma o carregamento após a correção. Outro teste executa o processo real por stdin em diretório separado, decifra um A1 sintético e carrega o TLS por memfd; somente o transporte HTTP é simulado. Isso não substitui o teste com o A1 real na Vercel.
+
+O diagnóstico agora retorna códigos fixos para falhas de inicialização, abertura do A1, preparo TLS e conexão nacional. O log contém somente o nome do evento e o código da etapa. stderr é capturado apenas para classificar falhas anteriores ao início do worker, sem retornar ou registrar o texto bruto. O erro antigo não permite determinar retrospectivamente qual dessas etapas falhou em produção. A interface encerra a mensagem de progresso ao final da tentativa.

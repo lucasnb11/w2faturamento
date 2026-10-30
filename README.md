@@ -1,4 +1,4 @@
-# W2 Faturamento · versão 2.9
+# W2 Faturamento · versão 2.9.1
 
 Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fechamentos por quinzena, importação de CAFs/AWBs, pagamentos por cidade e acesso por perfil no Supabase.
 

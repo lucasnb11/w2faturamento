@@ -25,10 +25,24 @@ BASE = '/API/SefinNacional'
 DOCS = ('/swagger/v1/swagger.json', '/swagger/docs/v1', '/docs/v1/swagger.json')
 CONVENIO = '/parametros_municipais/1500800/convenio'
 MAX_RESPONSE = 1024 * 1024
+ERRORS = {
+    'A1_ABERTURA': 'Não foi possível abrir o A1 cadastrado. Confira sua validade e a proteção do servidor.',
+    'A1_MEMORIA': 'O runtime não permite carregar o A1 em memória.',
+    'A1_PREPARO_TLS': 'Não foi possível preparar o A1 para a conexão TLS.',
+    'API_REDIRECIONAMENTO': 'A API retornou um redirecionamento e a consulta foi interrompida.',
+    'API_RESPOSTA_GRANDE': 'A resposta da API excedeu o limite do diagnóstico.',
+    'API_CONEXAO_TLS': 'A conexão TLS com a API de homologação não foi concluída.',
+    'PROCESSO_DEPENDENCIA': 'O processo de diagnóstico não conseguiu carregar uma biblioteca do servidor.',
+    'PROCESSO_ARQUIVO_AUSENTE': 'O processo de diagnóstico não encontrou seu arquivo no servidor.',
+    'PROCESSO_RESPOSTA': 'O processo de diagnóstico não devolveu uma resposta válida.',
+    'DIAGNOSTICO_INTERNO': 'O diagnóstico foi interrompido por uma falha interna.',
+}
 
 
 class NationalError(ValueError):
-    pass
+    def __init__(self, message, code='DIAGNOSTICO_INTERNO'):
+        super().__init__(message)
+        self.code = code if code in ERRORS else 'DIAGNOSTICO_INTERNO'
 
 
 def decrypt_material(record, key):
@@ -52,12 +66,12 @@ def decrypt_material(record, key):
             base64.b64decode(payload['pfx_base64'], validate=True), payload['senha'].encode('utf-8'))
         return private_key, certificate, chain or []
     except Exception:
-        raise NationalError('Não foi possível abrir o A1 cadastrado. Confira sua validade e a chave de proteção do servidor.') from None
+        raise NationalError(ERRORS['A1_ABERTURA'], 'A1_ABERTURA') from None
 
 
 def tls_context(material):
     if not hasattr(os, 'memfd_create'):
-        raise NationalError('Este runtime não oferece o carregamento do A1 em memória.')
+        raise NationalError(ERRORS['A1_MEMORIA'], 'A1_MEMORIA')
     private_key, cert, chain = material
     certificate = cert.public_bytes(serialization.Encoding.PEM) + b''.join(c.public_bytes(serialization.Encoding.PEM) for c in chain)
     private = private_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
@@ -72,7 +86,7 @@ def tls_context(material):
                 output.write(data)
         context.load_cert_chain('/proc/self/fd/' + str(fds[0]), '/proc/self/fd/' + str(fds[1]))
     except Exception:
-        raise NationalError('Não foi possível preparar o A1 para a conexão segura.') from None
+        raise NationalError(ERRORS['A1_PREPARO_TLS'], 'A1_PREPARO_TLS') from None
     finally:
         for fd in fds:
             os.close(fd)
@@ -87,10 +101,10 @@ def read_official(context, path):
         connection.request('GET', BASE + path, headers={'Accept': 'application/json', 'User-Agent': 'W2-NFSe-Homologacao/2.9'})
         response = connection.getresponse()
         if response.status in (301, 302, 303, 307, 308):
-            raise NationalError('A API respondeu com redirecionamento; a consulta foi interrompida.')
+            raise NationalError(ERRORS['API_REDIRECIONAMENTO'], 'API_REDIRECIONAMENTO')
         body = response.read(MAX_RESPONSE + 1)
         if len(body) > MAX_RESPONSE:
-            raise NationalError('A resposta da API excedeu o limite do diagnóstico.')
+            raise NationalError(ERRORS['API_RESPOSTA_GRANDE'], 'API_RESPOSTA_GRANDE')
         if response.status != 200:
             return response.status, None
         try:
@@ -101,7 +115,7 @@ def read_official(context, path):
     except NationalError:
         raise
     except Exception:
-        raise NationalError('Não foi possível concluir a conexão mTLS com a API de homologação.') from None
+        raise NationalError(ERRORS['API_CONEXAO_TLS'], 'API_CONEXAO_TLS') from None
     finally:
         connection.close()
 
@@ -153,20 +167,48 @@ def diagnostic_worker(record, key):
         'aviso': 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'}
 
 
+def worker_environment():
+    # Vercel pode carregar dependências por sys.path em diretórios do bundle.
+    # Não substituir esses caminhos apenas pela raiz do projeto.
+    env = {k: os.environ[k] for k in ('PATH', 'PYTHONHOME', 'LD_LIBRARY_PATH', 'LANG') if k in os.environ}
+    root = str(Path(__file__).resolve().parents[1])
+    paths = [root] + [p for p in sys.path if isinstance(p, str) and p]
+    env['PYTHONPATH'] = os.pathsep.join(dict.fromkeys(paths))
+    return env
+
+
+def _worker_failure(code):
+    code = code if isinstance(code, str) and code in ERRORS else 'DIAGNOSTICO_INTERNO'
+    # Somente enumeração fixa: nunca registrar stderr, payload ou exceção.
+    print(json.dumps({'evento': 'nfse_conexao_falha', 'etapa': code}), flush=True)
+    return SafeError(503, code, ERRORS[code] + ' Nenhuma DPS foi enviada. Código: ' + code + '.')
+
+
 def diagnose_connection(config):
     rows = api_json(config, '/rest/v1/' + TABLE + '?cnpj=eq.' + CNPJ + '&select=cnpj,dados_cifrados,nonce,key_version,sha256&limit=1')
     if not isinstance(rows, list) or len(rows) != 1:
         raise SafeError(409, 'A1_AUSENTE', 'Cadastre o A1 antes de testar a conexão.')
     payload = {'record': rows[0], 'key': base64.b64encode(config['encryption_key']).decode('ascii')}
-    env = {k: os.environ[k] for k in ('PATH', 'PYTHONHOME', 'LD_LIBRARY_PATH', 'LANG') if k in os.environ}
-    env['PYTHONPATH'] = str(Path(__file__).resolve().parents[1])
+    env = worker_environment()
     try:
         result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--diagnostic'],
-            input=json.dumps(payload).encode(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            input=json.dumps(payload).encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env, timeout=40, check=False)
-        data = json.loads(result.stdout)
+        try:
+            data = json.loads(result.stdout)
+        except (ValueError, UnicodeError):
+            # Ler apenas para classificar erros anteriores ao try do worker.
+            # O texto bruto nunca é exibido, registrado ou retornado.
+            stderr = getattr(result, 'stderr', b'') or b''
+            if b'ModuleNotFoundError' in stderr or b'ImportError' in stderr:
+                raise _worker_failure('PROCESSO_DEPENDENCIA') from None
+            if b"can't open file" in stderr:
+                raise _worker_failure('PROCESSO_ARQUIVO_AUSENTE') from None
+            raise _worker_failure('PROCESSO_RESPOSTA') from None
+        if result.returncode != 0 and isinstance(data, dict):
+            raise _worker_failure(data.get('erro_codigo'))
         if result.returncode != 0 or not isinstance(data, dict) or data.get('transmitido') is not False or data.get('emissao_oficial_disponivel') is not False:
-            raise ValueError()
+            raise _worker_failure('PROCESSO_RESPOSTA')
         allowed = ['ambiente','conexao_tls_respondeu','documentacao_http','contrato_recepcao_identificado','contrato_sha256','consulta_convenio_http','consulta_convenio_recebida','transmitido','emissao_oficial_disponivel']
         clean = {name: data.get(name) for name in allowed}
         clean['aviso'] = 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'
@@ -174,7 +216,7 @@ def diagnose_connection(config):
     except subprocess.TimeoutExpired:
         raise SafeError(504, 'CONEXAO_TEMPO_ESGOTADO', 'O diagnóstico excedeu o tempo de resposta. Nenhuma DPS foi enviada.') from None
     except (OSError, ValueError):
-        raise SafeError(503, 'CONEXAO_INDISPONIVEL', 'Não foi possível testar o A1 na API de homologação. Nenhuma DPS foi enviada.') from None
+        raise _worker_failure('PROCESSO_RESPOSTA') from None
 
 
 if __name__ == '__main__' and '--diagnostic' in sys.argv:
@@ -182,7 +224,8 @@ if __name__ == '__main__' and '--diagnostic' in sys.argv:
         data = json.loads(sys.stdin.buffer.read(600000))
         output = diagnostic_worker(data['record'], base64.b64decode(data['key'], validate=True))
         sys.stdout.write(json.dumps(output))
-    except Exception:
+    except Exception as exc:
         # Nunca incluir exceção, XML, credenciais ou resposta bruta da API.
-        sys.stdout.write(json.dumps({'transmitido': False, 'emissao_oficial_disponivel': False, 'erro': 'Falha no diagnóstico seguro do A1.'}))
+        code = exc.code if isinstance(exc, NationalError) else 'DIAGNOSTICO_INTERNO'
+        sys.stdout.write(json.dumps({'transmitido': False, 'emissao_oficial_disponivel': False, 'erro_codigo': code}))
         sys.exit(1)
