@@ -1,6 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "api/nfse/certificado.py": {"maxDuration": 60}
+    "api/nfse/certificado.py": {"maxDuration": 60},
+    "api/nfse/integracao.py": {
+      "maxDuration": 60,
+      "includeFiles": ["nfse_core/**", "api/nfse/certificado.py"]
+    }
   }
 }

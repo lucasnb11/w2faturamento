@@ -4,6 +4,8 @@ Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fecha
 
 Publicado em https://faturamento-jade.vercel.app.
 
+Em desenvolvimento: [validação local da integração fiscal](README_V2_8_INTEGRACAO.md), com XSD oficial de homologação e pendências por rascunho. Esta etapa não habilita transmissão.
+
 ## Notas fiscais
 
 A versão 2.7.1 inclui rascunhos, prévia de DANFSe sem validade fiscal e cadastro protegido do certificado A1 por administrador. A emissão oficial ainda depende de integração fiscal, validação contábil e homologação.
