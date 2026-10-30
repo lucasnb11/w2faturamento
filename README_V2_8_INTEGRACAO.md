@@ -34,7 +34,7 @@ Os endereços foram separados em logradouro, número, complemento, bairro, CEP e
 2. Confirmar número do endereço da W2 e cadastro atual da tomadora.
 3. Verificar a habilitação do contribuinte e parametrização municipal na API nacional usando A1, exclusivamente no backend. A consulta à documentação Swagger da Sefin retornou HTTP 503 no ambiente de desenvolvimento em 30/10/2026; o contrato detalhado de requisição/resposta ainda precisa ser conferido.
 4. Implementar reserva transacional da série/número por ambiente, trilha de auditoria, idempotência e reconciliação por DPS após respostas incertas. Um timeout não autoriza gerar outra DPS para a mesma operação.
-5. Implementar assinatura no padrão aceito, mTLS, transmissão em homologação, armazenamento privado do XML retornado e validação da correspondência entre DPS enviada e NFS-e recebida.
+5. Homologar o perfil de assinatura aceito e conectar o componente local ao fluxo com numeração reservada; implementar mTLS, transmissão em homologação, armazenamento privado do XML retornado e validação da correspondência entre DPS enviada e NFS-e recebida.
 6. Concluir homologação real e preparar leiaute de produção aplicável à competência antes de habilitar emissão oficial.
 
 ## Validação
@@ -65,3 +65,15 @@ A assinatura encontrada é da NFS-e retornada, com referência a infNFSe; a DPS 
 Série 70000 e número 10 foram usados pelo Emissor Web nessa nota. Eles não foram adotados como sequência do integrador. Antes de permitir emissão, deve ser conciliada a existência dessa nota histórica para impedir reemissão acidental da cobrança já faturada.
 
 A conferência com o pacote de produção publicado em 09/02/2026 encontrou rejeição do padrão da série 70000 no validador XSD utilizado. O arquivo recebido não foi modificado para fazê-lo passar. Esse resultado reforça que a homologação e a compatibilidade de produção ainda precisam ser concluídas.
+
+## Transporte aquaviário e componente de assinatura
+
+O usuário confirmou que o serviço inclui transporte aquático. Os códigos 26.01.01 e 1.0502.29.00 informados continuam como referência do contrato. Essa confirmação, por si só, não distingue transporte costeiro de navegação interior nem substitui a classificação contábil.
+
+O módulo `nfse_core/signature.py` assina e verifica DPS exclusivamente de homologação, vinculando o identificador esperado ao CNPJ da W2, município, série e número. Usa RSA-SHA256 com certificado correspondente e dentro da validade, digest SHA-256, referência local e transformações XMLDSig fixas. O perfil de canonicalização é argumento obrigatório, sem seleção implícita baseada na assinatura da NFS-e de referência. Foram implementadas canonicalização exclusiva com e sem comentários para testes; a aceitação pela Sefin ainda deve ser homologada.
+
+Referências primárias: [XML Signature 1.1](https://www.w3.org/TR/xmldsig-core1/) e [Exclusive XML Canonicalization](https://www.w3.org/TR/xml-exc-c14n/), consultadas em 30/10/2026.
+
+O componente rejeita produção, assinatura preexistente, referências externas, entidades/DTD, identificadores duplicados, CNPJ divergente e chave incompatível. A verificação usa o certificado esperado pelo chamador, sem confiar apenas no certificado inserido no XML. Não verifica cadeia ICP-Brasil nem revogação.
+
+Nenhuma rota chama esse módulo nesta etapa. Não foi acessado ou decifrado o A1 real da W2. Os testes usam certificados sintéticos gerados em memória, verificam digest e assinatura com primitivas independentes e validam a DPS assinada no XSD de homologação. Os números fictícios usados nos testes não foram reservados nem transmitidos. A ligação ao A1 cadastrado depende do fluxo transacional de reserva e emissão ainda pendente.
