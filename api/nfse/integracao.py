@@ -6,6 +6,7 @@ from urllib import parse
 
 from api.nfse.certificado import SafeError, settings, authorize, api_json, public_status
 from nfse_core.preflight import inspect
+from nfse_core.preparation import numbering_status
 
 
 class handler(BaseHTTPRequestHandler):
@@ -39,8 +40,11 @@ class handler(BaseHTTPRequestHandler):
                 except (ValueError, TypeError, KeyError):
                     pass
             if not writing:
+                numbering = numbering_status(api_json(config, '/rest/v1/nfse_homologacao_config?cnpj=eq.46167015000140&select=cnpj,serie,proximo_numero&limit=1'))
+                drafts = api_json(config, '/rest/v1/nfse_rascunhos?emitente_cnpj=eq.46167015000140&tomador_cnpj=eq.73939449000193&select=id&limit=1')
                 return self._respond_json(200, {'ambiente': 'homologacao', 'etapa': 'validacao_local',
                     'a1_cadastrado': bool(cert), 'a1_dentro_validade': valid,
+                    'numeracao': numbering, 'possui_rascunho': isinstance(drafts, list) and bool(drafts),
                     'emissao_oficial_disponivel': False, 'transmissao_disponivel': False})
             if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
                 raise SafeError(415, 'FORMATO_INVALIDO', 'Use o formulário do sistema.')

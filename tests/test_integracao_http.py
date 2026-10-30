@@ -21,6 +21,8 @@ class IntegrationHttpTests(unittest.TestCase):
         self.calls=[]
         def query(config,path,*args,**kwargs):
             self.calls.append((path,args,kwargs))
+            if path.startswith('/rest/v1/nfse_homologacao_config?'):
+                return [{'cnpj':'46167015000140','serie':None,'proximo_numero':1}]
             self.assertTrue(path.startswith('/rest/v1/nfse_rascunhos?'))
             self.assertFalse(args)
             return [copy.deepcopy(self.row)]
@@ -71,6 +73,21 @@ class IntegrationHttpTests(unittest.TestCase):
     def test_reserved_runtime_method_does_not_recurse(self):
         with patch.object(integracao.handler,'handle_request',side_effect=AssertionError(),create=True):
             self.assertEqual(self.call(method='GET')[0],200)
+
+    def test_preparation_only_reads_and_does_not_expose_draft_or_certificate(self):
+        status,body,_=self.call(method='GET')
+        self.assertEqual(status,200)
+        self.assertFalse(body['numeracao']['numeracao_pronta'])
+        self.assertFalse(body['numeracao']['numeracao_reservada'])
+        self.assertTrue(body['possui_rascunho'])
+        self.assertNotIn('descricao',json.dumps(body))
+        self.assertNotIn('dados_fiscais',json.dumps(body))
+        self.assertEqual(len(self.calls),2)
+        self.assertTrue(all(not args and not kwargs for _,args,kwargs in self.calls))
+        self.calls.clear()
+        with patch.object(integracao,'authorize',side_effect=SafeError(403,'ACESSO_RESTRITO','Administrador necessário.')):
+            self.assertEqual(self.call(method='GET')[0],403)
+        self.assertEqual(self.calls,[])
 
 
 if __name__=='__main__':unittest.main()
