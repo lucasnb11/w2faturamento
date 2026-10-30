@@ -1,8 +1,10 @@
-# W2 Faturamento · versão 2.7.1
+# W2 Faturamento · versão 2.9
 
 Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fechamentos por quinzena, importação de CAFs/AWBs, pagamentos por cidade e acesso por perfil no Supabase.
 
 Publicado em https://faturamento-jade.vercel.app.
+
+Inclui [validação local e assinatura da DPS](README_V2_8_INTEGRACAO.md) e [diagnóstico autenticado do A1 e controle de numeração de homologação](README_V2_9_CONEXAO.md). A transmissão e a emissão oficial continuam desabilitadas.
 
 ## Notas fiscais
 

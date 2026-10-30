@@ -1,5 +1,7 @@
 # W2 Faturamento — V2.7.1 · cadastro protegido do A1
 
+Documento histórico da versão 2.7.1. Posteriormente o usuário corrigiu o enquadramento da W2 para **não optante pelo Simples Nacional**. O cadastro atual e os próximos passos constam em `README_V2_8_INTEGRACAO.md` e `README_V2_9_CONEXAO.md`.
+
 Esta versão acrescenta a etapa de cadastro do certificado A1 ao Faturamento. A emissão fiscal continua indisponível: a integração de assinatura/transmissão da DPS, consulta de autorização e armazenamento do XML oficial ainda não foi implementada.
 
 ## Dados da W2 preenchidos
