@@ -22,10 +22,13 @@ from nfse_core.preflight import CNPJ, MUNICIPIO, NS
 DS = 'http://www.w3.org/2000/09/xmldsig#'
 RSA_SHA256 = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256'
 SHA256 = 'http://www.w3.org/2001/04/xmlenc#sha256'
+RSA_SHA1 = DS + 'rsa-sha1'
+SHA1 = DS + 'sha1'
+INCLUSIVE = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315'
 ENVELOPED = DS + 'enveloped-signature'
 EXCLUSIVE = 'http://www.w3.org/2001/10/xml-exc-c14n#'
 EXCLUSIVE_COMMENTS = EXCLUSIVE + 'WithComments'
-PROFILES = {EXCLUSIVE: False, EXCLUSIVE_COMMENTS: True}
+PROFILES = {EXCLUSIVE: (True, False), EXCLUSIVE_COMMENTS: (True, True), INCLUSIVE: (False, False)}
 MAX_XML = 512 * 1024
 
 
@@ -36,7 +39,17 @@ class SignatureError(ValueError):
 def _canonical(node, profile):
     if not isinstance(profile, str) or profile not in PROFILES:
         raise SignatureError('Perfil de canonicalização não suportado.')
-    return etree.tostring(node, method='c14n', exclusive=True, with_comments=PROFILES[profile])
+    exclusive, comments = PROFILES[profile]
+    return etree.tostring(node, method='c14n', exclusive=exclusive, with_comments=comments)
+
+
+def _algorithms(suite, profile):
+    # SHA-1 restrito ao perfil legado explicitamente escolhido para homologação.
+    if suite == RSA_SHA1 and profile == INCLUSIVE:
+        return hashlib.sha1, hashes.SHA1(), SHA1
+    if suite == RSA_SHA256 and profile in PROFILES:
+        return hashlib.sha256, hashes.SHA256(), SHA256
+    raise SignatureError('Conjunto de algoritmos não suportado.')
 
 
 def _document(xml, expected_id, signed):
@@ -103,36 +116,38 @@ def _add(parent, name, text=None, **attributes):
     return el
 
 
-def sign_homologation_dps(xml, private_key, certificate, *, expected_dps_id, profile):
+def sign_homologation_dps(xml, private_key, certificate, *, expected_dps_id, profile, suite=RSA_SHA256):
     """Assina apenas DPS de homologação; não constitui reserva ou transmissão."""
     root, info = _document(xml, expected_dps_id, signed=False)
     public_key = _certificate(certificate)
     if not isinstance(private_key, rsa.RSAPrivateKey) or private_key.public_key().public_numbers() != public_key.public_numbers():
         raise SignatureError('A chave não corresponde ao certificado informado.')
-    digest = base64.b64encode(hashlib.sha256(_canonical(info, profile)).digest()).decode('ascii')
-    signature = etree.SubElement(root, '{' + DS + '}Signature', nsmap={'ds': DS})
+    digest_function, hash_algorithm, digest_uri = _algorithms(suite, profile)
+    digest = base64.b64encode(digest_function(_canonical(info, profile)).digest()).decode('ascii')
+    signature = etree.SubElement(root, '{' + DS + '}Signature', nsmap={None: DS})
     signed_info = _add(signature, 'SignedInfo')
     _add(signed_info, 'CanonicalizationMethod', Algorithm=profile)
-    _add(signed_info, 'SignatureMethod', Algorithm=RSA_SHA256)
+    _add(signed_info, 'SignatureMethod', Algorithm=suite)
     ref = _add(signed_info, 'Reference', URI='#' + expected_dps_id)
     transforms = _add(ref, 'Transforms')
     _add(transforms, 'Transform', Algorithm=ENVELOPED)
     _add(transforms, 'Transform', Algorithm=profile)
-    _add(ref, 'DigestMethod', Algorithm=SHA256)
+    _add(ref, 'DigestMethod', Algorithm=digest_uri)
     _add(ref, 'DigestValue', digest)
-    value = private_key.sign(_canonical(signed_info, profile), padding.PKCS1v15(), hashes.SHA256())
+    value = private_key.sign(_canonical(signed_info, profile), padding.PKCS1v15(), hash_algorithm)
     _add(signature, 'SignatureValue', base64.b64encode(value).decode('ascii'))
     data = _add(_add(signature, 'KeyInfo'), 'X509Data')
     _add(data, 'X509Certificate', base64.b64encode(certificate.public_bytes(serialization.Encoding.DER)).decode('ascii'))
     encoded = etree.tostring(root, encoding='UTF-8', xml_declaration=True, pretty_print=False)
-    verify_homologation_dps(encoded, certificate, expected_dps_id=expected_dps_id, profile=profile)
+    verify_homologation_dps(encoded, certificate, expected_dps_id=expected_dps_id, profile=profile, suite=suite)
     return encoded
 
 
-def verify_homologation_dps(xml, trusted_certificate, *, expected_dps_id, profile):
+def verify_homologation_dps(xml, trusted_certificate, *, expected_dps_id, profile, suite=RSA_SHA256):
     """Confere integridade com certificado esperado, sem validar cadeia ou revogação."""
     root, info = _document(xml, expected_dps_id, signed=True)
     key = _certificate(trusted_certificate)
+    digest_function, hash_algorithm, digest_uri = _algorithms(suite, profile)
     try:
         signature = root.find('{' + DS + '}Signature')
         signed_info = signature.find('{' + DS + '}SignedInfo')
@@ -141,23 +156,23 @@ def verify_homologation_dps(xml, trusted_certificate, *, expected_dps_id, profil
                 raise ValueError()
         nodes(signature, ['SignedInfo', 'SignatureValue', 'KeyInfo'])
         nodes(signed_info, ['CanonicalizationMethod', 'SignatureMethod', 'Reference'])
-        if signed_info[0].get('Algorithm') != profile or signed_info[1].get('Algorithm') != RSA_SHA256:
+        if signed_info[0].get('Algorithm') != profile or signed_info[1].get('Algorithm') != suite:
             raise ValueError()
         ref = signed_info[2]
         nodes(ref, ['Transforms', 'DigestMethod', 'DigestValue'])
         nodes(ref[0], ['Transform', 'Transform'])
-        if ref.get('URI') != '#' + expected_dps_id or [x.get('Algorithm') for x in ref[0]] != [ENVELOPED, profile] or ref[1].get('Algorithm') != SHA256:
+        if ref.get('URI') != '#' + expected_dps_id or [x.get('Algorithm') for x in ref[0]] != [ENVELOPED, profile] or ref[1].get('Algorithm') != digest_uri:
             raise ValueError()
         # Não executar XPath, URLs ou transformações fornecidas pelo XML.
         if any(len(el) for el in [signed_info[0], signed_info[1], *ref[0], ref[1]]):
             raise ValueError()
-        actual = hashlib.sha256(_canonical(info, profile)).digest()
+        actual = digest_function(_canonical(info, profile)).digest()
         if not hmac.compare_digest(actual, base64.b64decode(ref[2].text, validate=True)):
             raise ValueError()
         cert_data = signature.find('{' + DS + '}KeyInfo/{' + DS + '}X509Data/{' + DS + '}X509Certificate')
         if cert_data is None or base64.b64decode(cert_data.text, validate=True) != trusted_certificate.public_bytes(serialization.Encoding.DER):
             raise ValueError()
-        key.verify(base64.b64decode(signature[1].text, validate=True), _canonical(signed_info, profile), padding.PKCS1v15(), hashes.SHA256())
+        key.verify(base64.b64decode(signature[1].text, validate=True), _canonical(signed_info, profile), padding.PKCS1v15(), hash_algorithm)
         return True
     except Exception:
         raise SignatureError('Assinatura inválida ou perfil divergente.') from None

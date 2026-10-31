@@ -46,7 +46,7 @@
         for(const issue of result.pendencias)text(list,issue.mensagem,'li');
         root.append(list);
       }
-      text(root,'Assinatura, reserva de numeração, transmissão e homologação com a API nacional ainda precisam ser concluídas. Nenhuma nota foi emitida.');
+      text(root,'Use a ação Homologação no rascunho para preparar a DPS e realizar uma transmissão de teste após conferir as pendências. Esta validação não envia notas.');
       root.scrollIntoView({behavior:'smooth',block:'start'});
     }catch(e){text(root,e.name==='AbortError'?'A validação excedeu o tempo de resposta. Nenhuma DPS foi transmitida.':e.message)}
     finally{busy=false}
@@ -85,7 +85,7 @@
       text(root,numbering?.numeracao_pronta===true?`Série de homologação: ${numbering.serie}. Próximo número: ${numbering.proximo_numero}. Nenhum número foi reservado nesta consulta.`:'Pendência: definir série própria de homologação entre 1 e 49.999 e conferir o próximo número livre.');
       text(root,result.possui_rascunho===true?'Há rascunho salvo. Abra-o e use Validar integração para conferir os dados fiscais.':'Pendência: salve um rascunho da quinzena escolhida para homologação e confirme os dados fiscais.');
       text(root,'A série 70.000 da nota de exemplo pertence ao emissor web e não será reutilizada pelo aplicativo.');
-      text(root,'O perfil XMLDSig e a habilitação ainda dependem de validação na API. Esta consulta não reserva números, não assina DPS e não emite notas.');
+      text(root,'Use Homologação no rascunho para preparar a DPS e validar a aceitação pela API. Esta consulta não reserva números, não assina DPS e não emite notas.');
     }catch(e){text(root,e.name==='AbortError'?'A consulta excedeu o tempo de resposta. Tente novamente.':e.message)}
     finally{busy=false;if(button)button.disabled=false;root.scrollIntoView({behavior:'smooth',block:'start'})}
   }

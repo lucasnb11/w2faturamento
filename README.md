@@ -1,14 +1,14 @@
-# W2 Faturamento · versão 2.10.1
+# W2 Faturamento · versão 2.11.0
 
 Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fechamentos por quinzena, importação de CAFs/AWBs, pagamentos por cidade e acesso por perfil no Supabase.
 
 Publicado em https://faturamento-jade.vercel.app.
 
-Inclui [validação local e assinatura da DPS](README_V2_8_INTEGRACAO.md) e [diagnóstico autenticado do A1 e controle de numeração de homologação](README_V2_9_CONEXAO.md). A transmissão e a emissão oficial continuam desabilitadas.
+Inclui [validação local e assinatura da DPS](README_V2_8_INTEGRACAO.md) e [diagnóstico autenticado do A1 e controle de numeração de homologação](README_V2_9_CONEXAO.md). A emissão em produção continua desabilitada. O fluxo de teste está documentado em [homologação 2.11](README_V2_11_HOMOLOGACAO.md).
 
 Consulte também a [preparação da DPS de homologação](README_V2_10_PREPARACAO.md).
 
-A versão 2.10.1 reorganiza a prévia do DANFSe conforme o modelo recebido: cabeçalho nacional, quatro colunas, blocos tributários e rodapé de ciência em A4. Mantém aviso de teste, campos pendentes e identificação fiscal sem número, chave ou QR de autorização.
+A versão 2.11.0 reorganiza a prévia do DANFSe conforme o modelo recebido: cabeçalho nacional, quatro colunas, blocos tributários e rodapé de ciência em A4. Mantém aviso de teste, campos pendentes e identificação fiscal sem número, chave ou QR de autorização.
 
 ## Notas fiscais
 
