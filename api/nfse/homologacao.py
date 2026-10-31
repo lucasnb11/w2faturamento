@@ -24,13 +24,14 @@ class handler(JsonHandler):
                 body = json.loads(self.rfile.read(int(length)))
             except Exception:
                 raise SafeError(400, 'DADOS_INVALIDOS', 'Requisição inválida.') from None
-            actions = {'status', 'preparar', 'transmitir', 'conciliar', 'baixar_xml'}
+            actions = {'status', 'preparar', 'transmitir', 'conciliar', 'baixar_xml', 'nova_tentativa'}
             if not isinstance(body, dict) or not isinstance(body.get('acao'), str) or body['acao'] not in actions:
                 raise SafeError(400, 'ACAO_INVALIDA', 'Ação não permitida.')
-            expected = {'acao', 'rascunho_id', 'versao'} | ({'confirmacao'} if body['acao'] == 'transmitir' else set())
+            confirmations = {'transmitir': 'ENVIAR_SOMENTE_HOMOLOGACAO', 'nova_tentativa': 'NOVA_DPS_SOMENTE_HOMOLOGACAO'}
+            expected = {'acao', 'rascunho_id', 'versao'} | ({'confirmacao'} if body['acao'] in confirmations else set())
             if (set(body) != expected or type(body.get('rascunho_id')) is not int or body['rascunho_id'] < 1
                 or not isinstance(body.get('versao'), str) or not 1 <= len(body['versao']) <= 64
-                or body['acao'] == 'transmitir' and body.get('confirmacao') != 'ENVIAR_SOMENTE_HOMOLOGACAO'):
+                or body['acao'] in confirmations and body.get('confirmacao') != confirmations[body['acao']]):
                 raise SafeError(400, 'DADOS_INVALIDOS', 'Confirme a ação sobre o rascunho salvo.')
             self._respond_json(200, operate(config, author, body))
         except SafeError as exc:

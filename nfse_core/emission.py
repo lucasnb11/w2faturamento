@@ -25,7 +25,7 @@ def rpc(config, name, payload):
 
 
 def load(config, draft_id):
-    query = urlencode({'rascunho_id': 'eq.' + str(draft_id), 'select': '*', 'limit': '1'})
+    query = urlencode({'rascunho_id': 'eq.' + str(draft_id), 'select': '*', 'order': 'tentativa.desc', 'limit': '1'})
     records = api_json(config, '/rest/v1/nfse_homologacao_dps?' + query)
     return row(records) if records else None
 
@@ -33,7 +33,19 @@ def load(config, draft_id):
 def metadata(reservation):
     if not reservation:
         return {'estado': 'nao_reservada'}
-    return {name: reservation.get(name) for name in ('id', 'dps_id', 'serie', 'numero', 'estado', 'chave_acesso', 'retorno_http', 'erros_codigos')}
+    return {name: reservation.get(name) for name in ('id', 'dps_id', 'serie', 'numero', 'tentativa', 'anterior_id', 'estado', 'chave_acesso', 'retorno_http', 'erros_codigos')}
+
+
+def retry_available(reservation):
+    if not reservation or reservation.get('estado') != 'pendente_consulta' or reservation.get('retorno_http') != 404:
+        return False
+    try:
+        created = datetime.fromisoformat(reservation['created_at'].replace('Z', '+00:00'))
+        return (bool(reservation.get('dps_xml_cifrado')) and not reservation.get('chave_acesso')
+                and not reservation.get('nfse_xml_cifrado')
+                and (datetime.now(timezone.utc) - created).total_seconds() >= 180)
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def worker(config, reservation, action):
@@ -75,6 +87,7 @@ def operate(config, author, body):
     reservation = load(config, body['rascunho_id'])
     answer = {'ambiente': 'homologacao', 'emissao_oficial_disponivel': False,
         'situacao': metadata(reservation), 'pendencias': [],
+        'nova_tentativa_disponivel': retry_available(reservation),
         'aviso': 'Ambiente de testes. Nenhuma NFS-e de produção é emitida por esta operação.'}
     documentary = reference_mode(reservation['snapshot'] if reservation else draft)
     answer['modo_validacao'] = 'referencia_documental' if documentary else 'confirmacoes_fiscais'
@@ -84,12 +97,22 @@ def operate(config, author, body):
         return answer
     if action in ('preparar', 'transmitir') and reservation and reservation.get('rascunho_versao') != body['versao']:
         raise SafeError(409, 'RESERVA_OUTRA_VERSAO', 'Há DPS reservada para outra versão. Concilie a reserva antes de continuar.')
-    if action in ('preparar', 'transmitir'):
+    if action in ('preparar', 'transmitir', 'nova_tentativa'):
         validation = inspect(draft)
         if not validation['xsd_valido'] or validation['pendencias']:
             answer['pendencias'] = validation['pendencias']
             return answer  # Sem reservar ou acessar o A1 quando há pendências fiscais.
-    if action == 'preparar':
+    if action == 'nova_tentativa':
+        if body.get('confirmacao') != 'NOVA_DPS_SOMENTE_HOMOLOGACAO' or not retry_available(reservation):
+            raise SafeError(409, 'NOVA_TENTATIVA_INDISPONIVEL', 'Consulte a tentativa anterior e confirme a criação de uma nova numeração de teste.')
+        # GET fresco antes da disputa transacional; nunca repete o POST antigo.
+        absence = worker(config, reservation, 'verificar_ausencia')
+        if absence.get('ausente') is not True or absence.get('http') != 404:
+            raise SafeError(409, 'AUSENCIA_NAO_CONFIRMADA', 'A consulta não confirmou HTTP 404. Concilie a tentativa anterior antes de continuar.')
+        reservation = rpc(config, 'nfse_nova_tentativa_homologacao', {
+            'p_anterior': reservation['id'], 'p_anterior_versao': reservation['updated_at'],
+            'p_versao': body['versao'], 'p_autor': author})
+    elif action == 'preparar':
         if reservation and reservation.get('estado') not in ('reservada', 'falha_local'):
             return answer  # Repetição não gera nem substitui XML assinado.
         if not reservation:
@@ -140,4 +163,5 @@ def operate(config, author, body):
     else:
         raise SafeError(400, 'ACAO_INVALIDA', 'Ação não permitida.')
     answer['situacao'] = metadata(reservation)
+    answer['nova_tentativa_disponivel'] = retry_available(reservation)
     return answer
