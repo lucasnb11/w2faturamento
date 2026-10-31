@@ -41,6 +41,18 @@ class DocumentaryReferenceTests(unittest.TestCase):
         self.assertEqual(root.xpath('//*[local-name()="IBSCBS"]'), [])
         self.assertEqual(root.xpath('//*[local-name()="pAliq"]'), [])
         self.assertEqual(root.xpath('//*[local-name()="CST"]/text()'), ['06'])
+        self.assertEqual(root.xpath('//*[local-name()="vDescCondIncond"]'), [])
+
+    def test_actual_discounts_are_preserved_and_schema_valid(self):
+        for unconditional, conditional in [('1,00','0,00'),('0,00','2,00'),('1,00','2,00')]:
+            with self.subTest(unconditional=unconditional,conditional=conditional):
+                row=documentary()
+                row['dados_fiscais'].update(desconto_incondicionado=unconditional,desconto_condicionado=conditional)
+                result=inspect(row,date(2026,10,31))
+                self.assertTrue(result['xsd_valido']);self.assertEqual(result['pendencias'],[])
+                root=build_simulation(row,datetime(2026,10,31,tzinfo=timezone.utc))
+                self.assertEqual(root.xpath('//*[local-name()="vDescIncond"]/text()'),[unconditional.replace(',','.')])
+                self.assertEqual(root.xpath('//*[local-name()="vDescCond"]/text()'),[conditional.replace(',','.')])
 
     def test_opt_in_exclusivity_and_source_are_required(self):
         for field, value in [('homologacao_por_referencia', False),

@@ -198,9 +198,12 @@ def build_simulation(row, now=None):
         element(element(service, 'infoCompl'), 'xInfComp', f['complementares'])
     values = element(info, 'valores')
     element(element(values, 'vServPrest'), 'vServ', f"{amount(row['valor_rem']):.2f}")
-    discounts = element(values, 'vDescCondIncond')
-    for key, name in [('desconto_incondicionado', 'vDescIncond'), ('desconto_condicionado', 'vDescCond')]:
-        element(discounts, name, f"{amount(f[key]):.2f}")
+    # Grupo opcional: sem descontos, preservar a omissão do XML de referência.
+    # Havendo qualquer desconto, manter os dois valores informados sem alterá-los.
+    if any(amount(f[key]) > 0 for key in ('desconto_incondicionado', 'desconto_condicionado')):
+        discounts = element(values, 'vDescCondIncond')
+        for key, name in [('desconto_incondicionado', 'vDescIncond'), ('desconto_condicionado', 'vDescCond')]:
+            element(discounts, name, f"{amount(f[key]):.2f}")
     tax = element(values, 'trib')
     municipal = element(tax, 'tribMun')
     element(municipal, 'tribISSQN', '1')

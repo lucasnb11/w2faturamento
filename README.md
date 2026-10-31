@@ -1,4 +1,4 @@
-# W2 Faturamento · versão 2.11.9
+# W2 Faturamento · versão 2.11.10
 
 Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fechamentos por quinzena, importação de CAFs/AWBs, pagamentos por cidade e acesso por perfil no Supabase.
 
@@ -54,3 +54,5 @@ A versão 2.11.7 consulta também o histórico de alíquotas do serviço 26.01.0
 A versão 2.11.8 exibe a mensagem limitada da consulta municipal, removendo identificadores e tratando-a como texto. Não altera dados fiscais.
 
 A versão 2.11.9 corrige a representação do código de consulta do histórico para 26.01.01.000. O complemento 000 identifica a consulta do serviço-base, sem inserir cTribMun no XML nem presumir ausência de especialização municipal.
+
+A versão 2.11.10 omite o grupo opcional de descontos quando ambos os valores são zero, reproduzindo a estrutura da DPS autorizada de referência. Descontos não nulos continuam preservados. Não altera valores, tributos, ambiente ou documentos anteriores. Não presume resolução de E0429.
