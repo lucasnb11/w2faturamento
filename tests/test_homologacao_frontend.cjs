@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-async function scenario(role='administrador',state='assinada',confirmation=true,code='<img src=x>'){
+async function scenario(role='administrador',state='assinada',confirmation=true,code='<img src=x>',retry=false){
   const elements=new Map(),calls=[];
   class Element{
     constructor(tag){this.tag=tag;this.children=[];this.textContent='';this.disabled=false;this.listeners={}}
@@ -15,7 +15,7 @@ async function scenario(role='administrador',state='assinada',confirmation=true,
   elements.set('nfRecords',new Element('div'));
   const context={document:{getElementById:id=>elements.get(id),createElement:tag=>new Element(tag)},location:{protocol:'https:'},AbortController,setTimeout,clearTimeout,
     window:{confirm:()=>confirmation,W2Auth:{role:()=>role},W2DB:{state:{client:{auth:{getSession:async()=>({data:{session:{access_token:'test-token'}}})}}}}},
-    fetch:async(url,options)=>{const body=JSON.parse(options.body);calls.push({url,options,body});return {ok:true,headers:{get:()=> 'application/json'},json:async()=>({ambiente:'homologacao',emissao_oficial_disponivel:false,aviso:'Somente teste',situacao:{estado:body.acao==='transmitir'?'pendente_consulta':state,erros_codigos:[code]},pendencias:[]})}}};
+    fetch:async(url,options)=>{const body=JSON.parse(options.body);calls.push({url,options,body});return {ok:true,headers:{get:()=> 'application/json'},json:async()=>({ambiente:'homologacao',emissao_oficial_disponivel:false,aviso:'Somente teste',nova_tentativa_disponivel:retry&&body.acao!=='nova_tentativa',situacao:{estado:body.acao==='nova_tentativa'?'reservada':body.acao==='transmitir'?'pendente_consulta':state,erros_codigos:[code]},pendencias:[]})}}};
   vm.createContext(context);vm.runInContext(fs.readFileSync('nfse-homologacao.js','utf8'),context);
   await context.window.W2Homologation.open({id:2,updated_at:'version',referencia:'1QMAIO26',dados_fiscais:{nao_enviar:'private'}});
   return {context,calls,root:elements.get('nfHomologationResult')};
@@ -35,5 +35,14 @@ async function scenario(role='administrador',state='assinada',confirmation=true,
   const clock=await scenario('administrador','pendente_consulta',true,'E0008');
   assert.equal(clock.calls.length,1);assert.ok(clock.root.children.some(n=>n.textContent.includes('data/hora de emissão')));
   assert.equal(clock.root.querySelectorAll('button').find(n=>n.textContent==='Transmitir somente em homologação').disabled,true);
+  const cancelRetry=await scenario('administrador','pendente_consulta',false,'',true);
+  await cancelRetry.root.querySelectorAll('button').find(n=>n.textContent==='Reservar nova tentativa de homologação').listeners.click();assert.equal(cancelRetry.calls.length,1);
+  const newRetry=await scenario('administrador','pendente_consulta',true,'',true);
+  await newRetry.root.querySelectorAll('button').find(n=>n.textContent==='Reservar nova tentativa de homologação').listeners.click();
+  assert.equal(newRetry.calls[1].body.acao,'nova_tentativa');assert.equal(newRetry.calls[1].body.confirmacao,'NOVA_DPS_SOMENTE_HOMOLOGACAO');
+  assert.deepEqual(Object.keys(newRetry.calls[1].body).sort(),['acao','confirmacao','rascunho_id','versao']);
+  assert.equal(newRetry.root.querySelectorAll('button').find(n=>n.textContent==='Transmitir somente em homologação').disabled,true);
+  assert.equal(newRetry.root.querySelectorAll('button').find(n=>n.textContent==='Reservar nova tentativa de homologação').disabled,true);
+  assert.equal(newRetry.root.querySelectorAll('button').find(n=>n.textContent==='Preparar DPS de homologação').disabled,false);
   console.log('OK: homologação exige administrador e confirmação separada; resultado incerto bloqueia novo envio e dados fiscais não saem do navegador.');
 })().catch(e=>{console.error(e);process.exitCode=1});

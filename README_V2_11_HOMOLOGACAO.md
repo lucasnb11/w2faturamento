@@ -65,3 +65,15 @@ A construção de novas DPS passa a representar o mesmo instante do relógio do 
 Validação: 91 testes Python e teste JavaScript da homologação. Incluem mudança de dia 02:37 UTC para 23:37 -03:00, igualdade do instante, competência preservada, XSD, recusa de datetime sem fuso e E0008 exibido com transmissão bloqueada. A aceitação dessa representação pela API precisa de nova recepção controlada após conciliar a tentativa anterior.
 
 Fonte: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/producao-restrita/anexo_i-sefin_adn-dps_nfse-snnfse_prodrest-v1-01-20261020.xlsx
+
+## Nova tentativa controlada (2.11.4)
+
+A reserva original era única por rascunho: um retorno 404 deixava o fluxo pendente, sem caminho para testar a correção de data/hora. A migração substitui essa unicidade por (rascunho, tentativa) e uma ligação única à tentativa anterior. O botão administrativo de nova tentativa exige confirmação própria. A API valida o rascunho atual e consulta o identificador anterior por GET, com contrato e mTLS, imediatamente antes da reserva. Somente HTTP 404 permite continuar; qualquer outro retorno ou falha bloqueia nova numeração.
+
+A transação verifica administrador ativo, versão atual do rascunho, versão da tentativa anterior, estado pendente, último retorno 404, XML assinado existente, ausência de documento autorizado e pelo menos três minutos desde o evento de envio. O bloqueio do rascunho, a checagem da última tentativa e as unicidades impedem duas reservas para a mesma origem. Cria uma linha em estado reservada, novo número e novo identificador; não altera a linha, XML, hash ou snapshot da tentativa anterior. A reserva normal permanece idempotente e passa a selecionar a tentativa mais recente.
+
+HTTP 404 descreve o resultado da consulta naquele instante, não uma garantia geral de ausência definitiva. A funcionalidade é exclusivamente de homologação e exige uma ação explícita; não habilita produção e não repete o POST antigo. Preparar/assinar e transmitir a nova DPS continuam sendo ações separadas. Se a consulta adicional não retornar 404, é necessário conciliar a tentativa anterior.
+
+O histórico anterior registrava transições, mas não preservava HTTP/códigos de cada resposta: por isso a consulta 404 substituiu E0008 no resumo. A partir desta migração, cada retorno grava esses metadados em eventos privados append-only. Respostas antigas não são reconstruídas nem atribuídas retrospectivamente à API.
+
+Validação: 99 testes Python, quatro conjuntos JavaScript e testes SQL com rollback em PostgreSQL isolado/PGlite. Cobrem confirmação independente, GET adicional sem POST, bloqueio de resultado diferente de 404, estado recente ou autorizado, validação fiscal, versão desatualizada, dupla reserva, integridade completa da linha antiga, idempotência e privilégios privados. A migração não reserva números; nenhuma DPS real foi criada, assinada ou transmitida nos testes desta entrega.

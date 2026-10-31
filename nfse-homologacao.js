@@ -11,6 +11,7 @@
     if(error||!data?.session?.access_token)throw new Error('Entre novamente no sistema.');
     const body={acao:action,rascunho_id:draft.id,versao:draft.updated_at};
     if(action==='transmitir')body.confirmacao='ENVIAR_SOMENTE_HOMOLOGACAO';
+    if(action==='nova_tentativa')body.confirmacao='NOVA_DPS_SOMENTE_HOMOLOGACAO';
     const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),125000);
     try{
       const response=await fetch('/api/nfse/homologacao',{method:'POST',mode:'same-origin',credentials:'omit',cache:'no-store',redirect:'error',signal:abort.signal,
@@ -28,11 +29,13 @@
     const s=result.situacao||{},state=s.estado;
     text(labels[state]||'Situação não identificada.');
     if(s.dps_id)text(`DPS: ${s.dps_id} · Série ${s.serie} · Número ${s.numero}.`);
+    if(s.tentativa)text(`Tentativa ${s.tentativa}${s.anterior_id?' · Tentativa anterior e XML preservados no histórico.':'.'}`);
     if(s.retorno_http)text(`Último retorno da API: HTTP ${s.retorno_http}.`);
     if(Array.isArray(s.erros_codigos)&&s.erros_codigos.length)text(`Códigos: ${s.erros_codigos.join(', ')}.`);
     if(Array.isArray(s.erros_codigos)&&s.erros_codigos.includes('E0008'))text('E0008: a API considerou a data/hora de emissão da DPS posterior à do processamento. Consulte o retorno desta tentativa; o XML assinado e o histórico serão preservados, sem reenvio automático.');
     if(s.chave_acesso)text(`Chave da NFS-e de homologação: ${s.chave_acesso}`);
     if(state==='pendente_consulta'||state==='enviando')text('O envio não será repetido. Consulte o retorno para conciliar esta DPS.');
+    if(result.nova_tentativa_disponivel===true)text('A última consulta retornou 404. É possível reservar outra numeração de teste com confirmação; o servidor fará nova consulta antes de reservar. A DPS anterior continuará preservada.');
     if(state==='rejeitada')text('A API rejeitou a assinatura ou o certificado. A tentativa foi preservada para análise; não há reenvio automático.');
     if(state==='assinada')text('Assinatura conferida localmente. A aceitação fiscal ainda será validada pela API de homologação.');
     if(result.pendencias?.length){text('Confira e salve os dados fiscais antes de preparar a DPS. Nenhum novo número foi reservado.');const list=document.createElement('ul');for(const issue of result.pendencias){const item=document.createElement('li');item.textContent=issue.mensagem;list.append(item)}root.append(list)}
@@ -40,13 +43,15 @@
       button('Preparar DPS de homologação','preparar',!['nao_reservada','reservada','falha_local'].includes(state)),
       button('Transmitir somente em homologação','transmitir',state!=='assinada'),
       button('Consultar retorno','conciliar',!['enviando','pendente_consulta','autorizada','rejeitada'].includes(state)),
-      button('Baixar XML de homologação','baixar_xml',state!=='autorizada'));
+      button('Baixar XML de homologação','baixar_xml',state!=='autorizada'),
+      button('Reservar nova tentativa de homologação','nova_tentativa',result.nova_tentativa_disponivel!==true));
     root.append(actions);
     text('A preparação reserva numeração de teste e assina a DPS no servidor. A transmissão exige uma confirmação separada.');
   }
   async function run(action){
     if(busy)return;
     if(window.W2Auth?.role?.()!=='administrador')return text('Somente administradores podem operar a homologação.');
+    if(action==='nova_tentativa'&&!window.confirm(`Reservar uma NOVA DPS de HOMOLOGAÇÃO para ${draft.referencia}? O servidor consultará a DPS anterior novamente. Seu XML e histórico serão preservados. Uma nova numeração será consumida; esta ação não assina nem transmite.`))return;
     if(action==='transmitir'&&!window.confirm(`Enviar a DPS de ${draft.referencia} exclusivamente para HOMOLOGAÇÃO? Este teste não emite nota fiscal de produção.`))return;
     busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);
     const progress=text('Processando no servidor. Aguarde até dois minutos.');

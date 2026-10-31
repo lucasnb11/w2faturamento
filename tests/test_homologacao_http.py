@@ -42,6 +42,12 @@ class HomologationHttpTests(unittest.TestCase):
         self.assertEqual(self.call(body)[0],400)
         self.assertEqual(self.call({**body,'confirmacao':'ENVIAR_PRODUCAO'})[0],400)
         self.assertEqual(self.call({**body,'confirmacao':'ENVIAR_SOMENTE_HOMOLOGACAO'})[0],200)
+    def test_new_attempt_requires_its_own_confirmation(self):
+        body={'acao':'nova_tentativa','rascunho_id':2,'versao':'current'}
+        self.assertEqual(self.call(body)[0],400)
+        self.assertEqual(self.call({**body,'confirmacao':'ENVIAR_SOMENTE_HOMOLOGACAO'})[0],400)
+        self.assertEqual(self.call({**body,'confirmacao':'NOVA_DPS_SOMENTE_HOMOLOGACAO'})[0],200)
+
     def test_unexpected_errors_do_not_disclose_xml_or_private_material(self):
         with patch.object(h,'operate',side_effect=RuntimeError('private-material')):
             status,body=self.call()

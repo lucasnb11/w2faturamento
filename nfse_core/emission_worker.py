@@ -100,6 +100,14 @@ def execute(payload):
             raise ValueError('Documento não autorizado.')
         return {'xml_base64': base64.b64encode(unseal(envelope(reservation, 'nfse'), key, dps_id, 'nfse')).decode()}
     material = decrypt_material(payload['record'], key)
+    if action == 'verificar_ausencia':
+        if reservation.get('estado') != 'pendente_consulta':
+            raise ValueError('Estado inválido para consulta de ausência.')
+        transport = Transport(tls_context(material))
+        if not transport.contract():
+            return {'ausente': False, 'http': None}
+        status, _ = transport.request('GET', '/dps/' + dps_id)
+        return {'ausente': status == 404, 'http': status}
     if action == 'preparar':
         xml = build_reserved_dps(reservation)
         signed = sign_homologation_dps(xml, material[0], material[1], expected_dps_id=dps_id, profile=INCLUSIVE, suite=RSA_SHA1)
