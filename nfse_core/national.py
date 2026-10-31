@@ -255,10 +255,51 @@ def diagnostic_worker(record, key):
         'consulta_convenio_rota_confirmada': route is not None,
         'consulta_convenio_erro_codigos': error_codes(convenio) if status != 200 else [],
         'consulta_convenio_http': status, 'consulta_convenio_recebida': status == 200 and convenio is not None,
+        'parametros_rotas_leitura': parameter_routes(parameters_document),
+        'consulta_convenio_resumo': parameter_summary(convenio) if status == 200 else [],
         'a1_prova_assinatura_local': proof,
         'perfil_assinatura_dps_validado': False,
         'transmitido': False, 'emissao_oficial_disponivel': False,
         'aviso': 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'}
+
+
+def parameter_routes(document):
+    """Somente metadados públicos GET do Swagger, nunca conteúdo de contribuinte."""
+    result = []
+    for path, item in (document or {}).get('paths', {}).items():
+        if not isinstance(item, dict) or not isinstance(item.get('get'), dict):
+            continue
+        if not re.fullmatch(r'/[A-Za-z0-9_/{}/-]{1,180}', path) or not any(w in path.lower() for w in ('aliquot', 'conven')):
+            continue
+        params = item.get('parameters', []) + item['get'].get('parameters', [])
+        result.append({'rota': path, 'parametros': [
+            {'nome': p.get('name'), 'local': p.get('in'), 'obrigatorio': p.get('required') is True}
+            for p in params if isinstance(p, dict) and isinstance(p.get('name'), str)
+            and re.fullmatch(r'[A-Za-z0-9_]{1,80}', p['name'])]})
+    return result[:12]
+
+
+def parameter_summary(document):
+    """Resumo municipal limitado; descarta identificadores pessoais e texto livre."""
+    result = []
+    def visit(value, path='', depth=0):
+        if depth > 5 or len(result) >= 60:
+            return
+        if isinstance(value, dict):
+            for name, item in value.items():
+                if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_]{1,80}', name):
+                    continue
+                if re.search(r'cnpj|cpf|email|fone|token|senha|certific|responsavel|usuario', name, re.I):
+                    continue
+                visit(item, path + '.' + name if path else name, depth + 1)
+        elif isinstance(value, list):
+            for index, item in enumerate(value[:8]):
+                visit(item, path + '[' + str(index) + ']', depth + 1)
+        elif re.search(r'aliquot|situacao|status|ativo|aderente|vigencia|inicio|fim|competencia|emissor', path, re.I):
+            if type(value) in (bool, int, float) or value is None or (isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9 .:/+_-]{0,64}', value)):
+                result.append({'campo': path, 'valor': value})
+    visit(document)
+    return result
 
 
 def prove_signing_key(material):
@@ -324,6 +365,7 @@ def diagnose_connection(config):
         allowed = ['ambiente','conexao_tls_respondeu','documentacao_http','contrato_recepcao_identificado','contrato_sha256','consulta_convenio_http','consulta_convenio_recebida','transmitido','emissao_oficial_disponivel',
             'parametros_servico','parametros_documentacao_http','consulta_convenio_rota','consulta_convenio_rota_confirmada','consulta_convenio_erro_codigos',
             'a1_prova_assinatura_local','perfil_assinatura_dps_validado']
+        allowed += ['parametros_rotas_leitura', 'consulta_convenio_resumo']
         clean = {name: data.get(name) for name in allowed}
         clean['aviso'] = 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'
         return clean

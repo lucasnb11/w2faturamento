@@ -67,6 +67,22 @@ class NationalTests(unittest.TestCase):
         other=national.decrypt_material(validate_and_encrypt(create_a1(),self.key),self.key)
         self.assertFalse(national.prove_signing_key((material[0],other[1],[])))
 
+    def test_municipal_summary_excludes_private_and_free_text(self):
+        summary=national.parameter_summary({'situacao':'ATIVO','dataInicio':'2026-10-01','cnpj':'private',
+            'responsavel':{'status':'private'},'email':'private','observacao':'private',
+            'aliquotas':[{'aliquota':5,'dataInicio':'2026-01-01'}]})
+        self.assertNotIn('private',str(summary))
+        self.assertIn({'campo':'situacao','valor':'ATIVO'},summary)
+        self.assertIn({'campo':'aliquotas[0].aliquota','valor':5},summary)
+
+    def test_parameter_discovery_cannot_return_external_or_write_routes(self):
+        doc=parameters_swagger()
+        doc['paths']['https://evil.example/aliquotas']={'get':{}}
+        doc['paths']['/aliquotas']={'post':{}}
+        routes=national.parameter_routes(doc)
+        self.assertEqual(len(routes),1)
+        self.assertEqual(routes[0]['rota'],'/parametros_municipais/{codigoMunicipio}/convenio')
+
     def test_parameters_route_is_declared_unique_and_needs_no_extra_query(self):
         doc=parameters_swagger()
         self.assertEqual(national.parameter_endpoint(doc),national.CONVENIO)

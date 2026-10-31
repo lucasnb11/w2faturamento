@@ -1,4 +1,4 @@
-# W2 Faturamento · versão 2.11.5
+# W2 Faturamento · versão 2.11.6
 
 Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fechamentos por quinzena, importação de CAFs/AWBs, pagamentos por cidade e acesso por perfil no Supabase.
 
@@ -46,3 +46,5 @@ A versão 2.11.4 permite reservar explicitamente outra tentativa de homologaçã
 A versão 2.11.5 corrige a canonicalização de subconjuntos XML usados na assinatura: normaliza o contexto de namespaces em uma cópia antes do C14N e preserva atributos xml:* herdados no perfil inclusivo. O XML transmitido não é reescrito depois de assinado. Mantém algoritmos e perfis existentes; não altera certificados, tributos ou documentos anteriores. Inclui testes independentes com Java 17 (somente QA, sem dependência em produção).
 
 A retomada explícita também aceita rejeição isolada E0714/HTTP 400 ou 422, sempre após novo GET 404 no servidor e com os mesmos controles transacionais da versão anterior. Aplicar `sql/nfse_v2_11_5_assinatura.sql` antes de publicar. Não reserva nem envia automaticamente.
+
+A versão 2.11.6 amplia o diagnóstico de leitura do convênio municipal e explica E0429 na interface. Não altera dados fiscais nem transmite DPS automaticamente.

@@ -91,3 +91,9 @@ A nova tentativa pode ser reservada após E0714 isolado/HTTP 400 ou 422, mediant
 Validação: 108 testes Python (incluindo o oráculo Java), quatro conjuntos JavaScript e scripts SQL com rollback em PostgreSQL isolado/PGlite. A integridade da assinatura externa da NFS-e fornecida anteriormente também passou; isso não valida sua cadeia de certificados. Nenhuma DPS real foi reservada, assinada novamente ou transmitida por estes testes. A aceitação do XML corrigido pela API ainda depende de uma recepção controlada.
 
 Fontes: Anexo I de homologação 20/10/2026 (E0714) e Canonical XML 1.0, https://www.w3.org/TR/2001/REC-xml-c14n-20010315 .
+
+## Diagnóstico de ISS (2.11.6)
+
+O botão de conexão passa a apresentar um resumo limitado dos parâmetros públicos de convênio municipal e metadados das rotas GET de alíquotas declaradas pelo Swagger do ADN. Não retorna documentos, A1, dados de contribuinte ou texto livre da resposta. Mantém os destinos de homologação, mTLS e somente leitura. A tela explica E0429 como código fiscal, distinto de HTTP 429.
+
+Esta versão de diagnóstico não corrige nem presume a causa da rejeição E0429 da tentativa 3. Os parâmetros de município e competência ainda precisam ser confrontados com o cenário documental. Não altera tributos, rascunhos, reservas ou XMLs históricos e não transmite automaticamente.
