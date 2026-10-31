@@ -1,4 +1,4 @@
-# W2 Faturamento · versão 2.11.7
+# W2 Faturamento · versão 2.11.8
 
 Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fechamentos por quinzena, importação de CAFs/AWBs, pagamentos por cidade e acesso por perfil no Supabase.
 
@@ -50,3 +50,5 @@ A retomada explícita também aceita rejeição isolada E0714/HTTP 400 ou 422, s
 A versão 2.11.6 amplia o diagnóstico de leitura do convênio municipal e explica E0429 na interface. Não altera dados fiscais nem transmite DPS automaticamente.
 
 A versão 2.11.7 consulta também o histórico de alíquotas do serviço 26.01.01 em Ananindeua, somente quando a rota GET consta no Swagger oficial. Não altera o cenário fiscal.
+
+A versão 2.11.8 exibe a mensagem limitada da consulta municipal, removendo identificadores e tratando-a como texto. Não altera dados fiscais.

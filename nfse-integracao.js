@@ -67,6 +67,7 @@
       if(Array.isArray(result.consulta_convenio_erro_codigos)&&result.consulta_convenio_erro_codigos.length)text(root,`Códigos retornados pela API municipal: ${result.consulta_convenio_erro_codigos.join(', ')}.`);
       for(const item of result.consulta_convenio_resumo||[])text(root,`Parâmetro municipal · ${item.campo}: ${item.valor}.`);
       if(result.historico_aliquotas_http)text(root,`Histórico de alíquotas do serviço 26.01.01 em Ananindeua: HTTP ${result.historico_aliquotas_http}.`);
+      if(result.historico_aliquotas_mensagem)text(root,`Resposta da consulta municipal: ${result.historico_aliquotas_mensagem}`);
       for(const item of result.historico_aliquotas_resumo||[])text(root,`Histórico ISS · ${item.campo}: ${item.valor}.`);
       if(result.historico_aliquotas_codigos?.length)text(root,`Histórico ISS · códigos: ${result.historico_aliquotas_codigos.join(', ')}.`);
       for(const item of result.parametros_rotas_leitura||[])text(root,`Consulta de parâmetros disponível: ${item.rota} · ${item.parametros.map(p=>`${p.nome} (${p.local}${p.obrigatorio?', obrigatório':''})`).join(', ')}.`);

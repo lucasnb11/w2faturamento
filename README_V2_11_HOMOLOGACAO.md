@@ -99,3 +99,5 @@ O botão de conexão passa a apresentar um resumo limitado dos parâmetros públ
 Esta versão de diagnóstico não corrige nem presume a causa da rejeição E0429 da tentativa 3. Os parâmetros de município e competência ainda precisam ser confrontados com o cenário documental. Não altera tributos, rascunhos, reservas ou XMLs históricos e não transmite automaticamente.
 
 A versão 2.11.7 acrescenta GET ao histórico de alíquotas do serviço 260101 no município 1500800, por rota observada no Swagger do ADN. A resposta é resumida e não altera dados, reserva ou transmissão. Lista JSON também é aceita somente no leitor de parâmetros municipais.
+
+A versão 2.11.8 apresenta a mensagem de erro da consulta de parâmetros com limite de tamanho e remoção de identificadores; não registra respostas brutas ou dados do A1.

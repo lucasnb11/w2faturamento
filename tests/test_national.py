@@ -95,6 +95,13 @@ class NationalTests(unittest.TestCase):
         self.assertNotIn('private',str(result))
         self.assertFalse(result['transmitido'])
 
+    def test_parameter_message_masks_identifiers_and_is_bounded(self):
+        self.assertIsNone(national.parameter_message({'cnpj':'private'}))
+        text=national.parameter_message({'mensagem':'<Erro> 46.167.015/0001-40 contato@example.com 12345678901'})
+        for private in ['46.167.015/0001-40','contato@example.com','12345678901','<','>']:
+            self.assertNotIn(private,text)
+        self.assertEqual(len(national.parameter_message({'mensagem':'X'*700})),600)
+
     def test_parameters_route_is_declared_unique_and_needs_no_extra_query(self):
         doc=parameters_swagger()
         self.assertEqual(national.parameter_endpoint(doc),national.CONVENIO)
