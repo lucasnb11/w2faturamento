@@ -76,6 +76,8 @@ class NationalTests(unittest.TestCase):
         self.assertIn({'campo':'aliquotas[0].aliquota','valor':5},summary)
         self.assertIn({'campo':'aliquotas.26.01.01.000[0].aliquota','valor':5},
             national.parameter_summary({'aliquotas':{'26.01.01.000':[{'aliquota':5}]}}))
+        self.assertIn({'campo':'aliquotas.26.01.01.000[0].Incidencia','valor':'NÃO'},
+            national.parameter_summary({'aliquotas':{'26.01.01.000':[{'Incidencia':'NÃO','Aliq':None}]}}))
 
     def test_parameter_discovery_cannot_return_external_or_write_routes(self):
         doc=parameters_swagger()

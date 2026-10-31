@@ -306,7 +306,7 @@ def parameter_summary(document):
             for index, item in enumerate(value[:8]):
                 visit(item, path + '[' + str(index) + ']', depth + 1)
         elif re.search(r'aliquot|situacao|status|ativo|aderente|vigencia|inicio|fim|competencia|emissor', path, re.I):
-            if type(value) in (bool, int, float) or value is None or (isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9 .:/+_-]{0,64}', value)):
+            if type(value) in (bool, int, float) or value is None or (isinstance(value, str) and re.fullmatch(r'[A-Za-zÀ-ÿ0-9 .:/+_-]{0,64}', value)):
                 result.append({'campo': path, 'valor': value})
     visit(document)
     return result

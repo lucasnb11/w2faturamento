@@ -69,6 +69,7 @@
       if(result.historico_aliquotas_http)text(root,`Histórico de alíquotas do serviço 26.01.01 em Ananindeua: HTTP ${result.historico_aliquotas_http}.`);
       if(result.historico_aliquotas_mensagem)text(root,`Resposta da consulta municipal: ${result.historico_aliquotas_mensagem}`);
       for(const item of result.historico_aliquotas_resumo||[])text(root,`Histórico ISS · ${item.campo}: ${item.valor}.`);
+      if((result.historico_aliquotas_resumo||[]).some(item=>/\.Aliq$/i.test(item.campo)&&item.valor===null))text(root,'O histórico municipal contém alíquota não definida (null). Confira a vigência e a incidência para a competência da nota; null não significa alíquota zero e não autoriza substituir o parâmetro municipal.');
       if(result.historico_aliquotas_codigos?.length)text(root,`Histórico ISS · códigos: ${result.historico_aliquotas_codigos.join(', ')}.`);
       for(const item of result.parametros_rotas_leitura||[])text(root,`Consulta de parâmetros disponível: ${item.rota} · ${item.parametros.map(p=>`${p.nome} (${p.local}${p.obrigatorio?', obrigatório':''})`).join(', ')}.`);
       text(root,result.contrato_recepcao_identificado?'Campo de recepção identificado na documentação retornada pela API.':'O contrato de recepção ainda não foi confirmado pela documentação da API.');
