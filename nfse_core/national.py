@@ -266,6 +266,7 @@ def diagnostic_worker(record, key):
         'historico_aliquotas_http': history_status,
         'historico_aliquotas_resumo': parameter_summary(history) if history_status == 200 else [],
         'historico_aliquotas_codigos': error_codes(history) if history_status != 200 else [],
+        'historico_aliquotas_mensagem': parameter_message(history),
         'a1_prova_assinatura_local': proof,
         'perfil_assinatura_dps_validado': False,
         'transmitido': False, 'emissao_oficial_disponivel': False,
@@ -309,6 +310,24 @@ def parameter_summary(document):
                 result.append({'campo': path, 'valor': value})
     visit(document)
     return result
+
+
+def parameter_message(document):
+    """Mensagem da consulta municipal, sem dados identificadores ou HTML."""
+    message = document.get('mensagem') if isinstance(document, dict) else None
+    if not message and isinstance(document, dict):
+        errors = document.get('errors', {})
+        parts = [document['title']] if isinstance(document.get('title'), str) else []
+        for name in ('codigoServico', 'codigoMunicipio', 'competencia'):
+            items = errors.get(name, []) if isinstance(errors, dict) else []
+            if isinstance(items, list):
+                parts.extend(name + ': ' + item for item in items[:3] if isinstance(item, str))
+        message = ' '.join(parts) or None
+    if not isinstance(message, str):
+        return None
+    message = re.sub(r'[\w.+-]+@[\w.-]+', '[e-mail omitido]', message)
+    message = re.sub(r'(?<!\d)\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}|(?<!\d)\d{11,}(?!\d)', '[identificador omitido]', message)
+    return re.sub(r'[<>\x00-\x1f]', ' ', message)[:600]
 
 
 def prove_signing_key(material):
@@ -376,6 +395,7 @@ def diagnose_connection(config):
             'a1_prova_assinatura_local','perfil_assinatura_dps_validado']
         allowed += ['parametros_rotas_leitura', 'consulta_convenio_resumo',
             'historico_aliquotas_http', 'historico_aliquotas_resumo', 'historico_aliquotas_codigos']
+        allowed += ['historico_aliquotas_mensagem']
         clean = {name: data.get(name) for name in allowed}
         clean['aviso'] = 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'
         return clean
