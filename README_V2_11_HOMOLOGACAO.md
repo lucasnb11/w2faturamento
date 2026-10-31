@@ -4,7 +4,7 @@ Esta versão conecta reserva, montagem, assinatura, envio, consulta e guarda do 
 
 ## Antes de publicar
 
-1. Aplicar `sql/nfse_v2_11_homologacao.sql` no projeto já usado pelo Faturamento. Ela restringe as séries a 1–49999, adiciona colunas de XML cifrado e funções privadas. Não altera o rascunho, as confirmações fiscais ou o A1. Se houver série fora da faixa, a migração falha sem corrigir dados silenciosamente.
+1. Aplicar `sql/nfse_v2_11_homologacao.sql` e depois `sql/nfse_v2_11_auditoria_privada.sql` no projeto já usado pelo Faturamento. Elas restringem as séries a 1–49999, adicionam colunas de XML cifrado/funções privadas e removem privilégios padrão excessivos do papel da aplicação. Não alteram o rascunho, as confirmações fiscais ou o A1. Se houver série fora da faixa, a migração falha sem corrigir dados silenciosamente.
 2. Executar `sql/test_nfse_v2_11_homologacao.sql` em transação com ROLLBACK e conferir estado/configuração reais antes e depois. O teste não chama a API nacional nem o A1. A sequência interna do ID do rascunho pode avançar; isso não é numeração fiscal. Não repetir testes que já passaram sem uma nova alteração ou falha.
 3. Conferir RLS/grants e publicar o commit aprovado. A função `api/nfse/homologacao.py` usa até 120 segundos. Não adicionar ou substituir chaves já existentes.
 
@@ -41,5 +41,7 @@ Fonte: https://www.gov.br/nfse/pt-br/biblioteca/manuais-e-tutoriais/manual-integ
 83 testes Python e três conjuntos JavaScript aprovados. Incluem processo real com A1 sintético, assinatura após serialização, XSD real da NFS-e sintética, referência/digest/assinatura, vínculo do envelope, compactação malformada/bomba gzip, resultado de produção ou de outra DPS, um único POST, timeout, edição posterior do rascunho, confirmação separada e ausência de HTML dinâmico nas mensagens.
 
 Os SQLs inicial e novo e os dois scripts transacionais passaram em PostgreSQL isolado via PGlite 0.5.13. Ao final dos testes: zero rascunhos, reservas e eventos sintéticos, configuração original restaurada. Isso não substitui a verificação da migração no Supabase antes da publicação.
+
+Na verificação do Supabase, o teste identificou UPDATE/DELETE no histórico concedidos ao `service_role` pelos privilégios padrão do projeto. A migração adicional de auditoria revoga todos os grants desse papel nas três tabelas do fluxo e repõe somente os necessários, incluindo SELECT/INSERT no histórico. O acesso anônimo/autenticado às tabelas e funções já estava bloqueado. O teste inicial foi revertido integralmente; não consumiu número de DPS. Após a correção, o script transacional passou no Supabase. A conferência final preservou um rascunho real, zero reservas/eventos, série 1 e próximo número 1. RLS ativo, tabelas/funções inacessíveis a anon/authenticated e histórico sem UPDATE/DELETE/TRUNCATE para service_role.
 
 Nenhum teste desta entrega abriu o A1 real, transmitiu DPS da W2 ou confirmou seu enquadramento fiscal. O rascunho 1QMAIO26 ainda contém campos fiscais pendentes. A primeira recepção real deve ser iniciada pelo administrador somente depois de conferir esses dados.
