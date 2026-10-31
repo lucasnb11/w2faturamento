@@ -21,8 +21,9 @@
     const percent=key=>amount(f[key])===null?'Pendente':amount(f[key]).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' %';
     const date=/^\d{4}-\d{2}-\d{2}$/.test(f.competencia||'')?f.competencia.split('-').reverse().join('/'):'Pendente';
     const ibsNA=f.ibscbs_tratamento==='Não aplicável conforme validação contábil';
-    const ibsValue=key=>ibsNA?'—':tax(key);
-    const ibsMeta=value=>ibsNA?'—':value||'Pendente';
+    const ibsReference=f.homologacao_por_referencia===true&&f.uso_exclusivo_homologacao===true&&f.ibscbs_tratamento==='Não informado na nota de referência · homologação';
+    const ibsValue=key=>ibsReference?'Não informado':ibsNA?'—':tax(key);
+    const ibsMeta=value=>ibsReference?'Não informado':ibsNA?'—':value||'Pendente';
     const ibs=amount(f.ibs),cbs=amount(f.cbs);
     const ibsTotal=ibsNA?0:ibs!==null&&cbs!==null?ibs+cbs:null;
     const totalRet=t.retained===null?'Pendente':money(t.retained);
@@ -56,7 +57,7 @@
       </div><aside class="danf-authenticity"><div class="danf-qr-placeholder">SEM QR<br>FISCAL</div><p>A chave de acesso e o QR Code fiscal estarão disponíveis somente após autorização da NFS-e.</p></aside></section>
       ${provider}${customer}<div class="danf-strip">DESTINATÁRIO DA OPERAÇÃO: ${esc(f.destinatario_proprio?'PRÓPRIO TOMADOR':'PENDENTE DE CONFERÊNCIA')}</div><div class="danf-strip">${esc(f.intermediario_nome?'INTERMEDIÁRIO: '+f.intermediario_nome+' · '+(f.intermediario_documento||'Pendente'):'INTERMEDIÁRIO DA OPERAÇÃO NÃO INFORMADO')}</div>
       ${service}${municipal}${federal}${ibsBlock}${values}
-      <section class="danf-complementary"><h3>INFORMAÇÕES COMPLEMENTARES</h3><p>${esc(f.complementares||'Não informadas.')}</p><p>Totais aproximados dos Tributos: ${esc(approximate)}.</p><p>Referência: ${esc(row.referencia)} · Código do contratante: ${esc(row.codigo_contratante||'—')}.</p><p class="danf-validation">Conferência fiscal: ${esc(f.fiscal_confirmado?'confirmada pelo usuário':'pendente')}. Consolidação por quinzena: ${esc(f.consolidacao_confirmada?'confirmada pelo usuário':'pendente')}. Data de competência: ${esc(f.competencia_confirmada?'conferida pelo usuário':'pendente de confirmação')}.</p></section>
+      <section class="danf-complementary"><h3>INFORMAÇÕES COMPLEMENTARES</h3><p>${esc(f.complementares||'Não informadas.')}</p><p>Totais aproximados dos Tributos: ${esc(approximate)}.</p><p>Referência: ${esc(row.referencia)} · Código do contratante: ${esc(row.codigo_contratante||'—')}.</p>${f.homologacao_por_referencia?'<p>Cenário documental somente para homologação. IBS/CBS não informado no modelo não significa não aplicável.</p>':''}<p class="danf-validation">Conferência fiscal: ${esc(f.fiscal_confirmado?'confirmada pelo usuário':'pendente')}. Consolidação por quinzena: ${esc(f.consolidacao_confirmada?'confirmada pelo usuário':'pendente')}. Data de competência: ${esc(f.competencia_confirmada?'conferida pelo usuário':'pendente de confirmação')}.</p></section>
       <footer class="danf-receipt"><div><b>DATA CIENTIFICAÇÃO:</b><span>—</span></div><div><b>IDENTIFICAÇÃO E ASSINATURA</b><span>Prévia para conferência</span></div><div><b>Nº NFS-e / CHAVE NFS-e</b><span>Não emitida / Não gerada</span></div></footer><p class="danf-footer">PRÉVIA SEM VALIDADE FISCAL. Nenhuma DPS foi assinada ou transmitida. Campos pendentes não representam valores zero.</p></article>`;
   }
   window.W2Danfse={render};

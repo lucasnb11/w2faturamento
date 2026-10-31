@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 from api.nfse.certificado import SafeError, api_json, CNPJ, TABLE
 from nfse_core.national import worker_environment
-from nfse_core.preflight import inspect
+from nfse_core.preflight import inspect, reference_mode, REFERENCE_NOTICE
 
 
 def row(value):
@@ -76,6 +76,10 @@ def operate(config, author, body):
     answer = {'ambiente': 'homologacao', 'emissao_oficial_disponivel': False,
         'situacao': metadata(reservation), 'pendencias': [],
         'aviso': 'Ambiente de testes. Nenhuma NFS-e de produção é emitida por esta operação.'}
+    documentary = reference_mode(reservation['snapshot'] if reservation else draft)
+    answer['modo_validacao'] = 'referencia_documental' if documentary else 'confirmacoes_fiscais'
+    if documentary:
+        answer['aviso'] += ' ' + REFERENCE_NOTICE
     if action == 'status':
         return answer
     if action in ('preparar', 'transmitir') and reservation and reservation.get('rascunho_versao') != body['versao']:
