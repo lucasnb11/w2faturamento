@@ -101,7 +101,8 @@ def execute(payload):
         return {'xml_base64': base64.b64encode(unseal(envelope(reservation, 'nfse'), key, dps_id, 'nfse')).decode()}
     material = decrypt_material(payload['record'], key)
     if action == 'verificar_ausencia':
-        if reservation.get('estado') != 'pendente_consulta':
+        rejected_signature = reservation.get('estado') == 'rejeitada' and reservation.get('retorno_http') in (400, 422) and reservation.get('erros_codigos') == ['E0714']
+        if reservation.get('estado') != 'pendente_consulta' and not rejected_signature:
             raise ValueError('Estado inválido para consulta de ausência.')
         transport = Transport(tls_context(material))
         if not transport.contract():
@@ -119,7 +120,11 @@ def execute(payload):
     if reservation.get('estado') not in allowed_states:
         raise ValueError('Estado inválido para a operação.')
     xml = unseal(envelope(reservation, 'dps'), key, dps_id, 'dps')
-    verify_homologation_dps(xml, material[1], expected_dps_id=dps_id, profile=INCLUSIVE, suite=RSA_SHA1)
+    # Uma consulta GET deve continuar possível para o XML antigo rejeitado.
+    # Sua integridade de armazenamento é conferida pelo envelope AES-GCM.
+    # Antes de qualquer POST, a assinatura continua sendo obrigatória.
+    if action == 'transmitir':
+        verify_homologation_dps(xml, material[1], expected_dps_id=dps_id, profile=INCLUSIVE, suite=RSA_SHA1)
     transport = Transport(tls_context(material))
     try:
         return transmit(transport, xml, dps_id, key) if action == 'transmitir' else reconcile(transport, xml, dps_id, key)

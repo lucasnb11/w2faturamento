@@ -72,3 +72,37 @@ class NewAttemptTests(unittest.TestCase):
         self.assertIn('order=tentativa.desc',api.call_args.args[1])
         self.assertNotIn('opaque',str(e.metadata(self.pending())))
 
+
+    def rejected_signature(self):
+        return {**self.pending(),'estado':'rejeitada','retorno_http':400,'erros_codigos':['E0714']}
+    def test_only_isolated_e0714_allows_controlled_retry_after_rejection(self):
+        rejected=self.rejected_signature();self.assertTrue(e.retry_available(rejected))
+        for change in [{'erros_codigos':['E0715']},{'erros_codigos':['E0714','E0715']},
+                       {'erros_codigos':[]},{'retorno_http':None},{'retorno_http':500},
+                       {'estado':'enviando'}]:
+            self.assertFalse(e.retry_available({**rejected,**change}))
+    def test_e0714_absence_query_remains_get_only(self):
+        calls=[];transport=types.SimpleNamespace(contract=lambda:True,request=lambda *args:(calls.append(args) or (404,None)))
+        with patch.object(w,'Transport',return_value=transport),patch.object(w,'unseal',side_effect=AssertionError('não abrir XML')):
+            result=w.execute({'action':'verificar_ausencia','key':base64.b64encode(self.key).decode(),
+                              'record':self.record,'reservation':self.rejected_signature()})
+        self.assertTrue(result['ausente']);self.assertEqual(calls,[('GET','/dps/'+self.r['dps_id'])])
+    def test_known_rejected_xml_can_be_queried_without_requiring_a_valid_signature(self):
+        document=synthetic.EmissionTests.prepare(self)
+        reservation={**self.rejected_signature(),**{'dps_xml_'+k:v for k,v in document.items()}}
+        calls=[];transport=types.SimpleNamespace(request=lambda *args:(calls.append(args) or (404,None)))
+        with patch.object(w,'Transport',return_value=transport),patch.object(w,'verify_homologation_dps',side_effect=AssertionError('GET não depende da assinatura rejeitada')):
+            result=w.execute({'action':'conciliar','key':base64.b64encode(self.key).decode(),
+                              'record':self.record,'reservation':reservation})
+        self.assertEqual(result['http'],404);self.assertEqual(calls,[('GET','/dps/'+self.r['dps_id'])])
+    def test_transmission_still_rejects_modified_signature_before_any_network(self):
+        from nfse_core import protocol as protocol
+        document=synthetic.EmissionTests.prepare(self)
+        xml=protocol.unseal(document,self.key,self.r['dps_id'],'dps').replace(b'15169.50',b'15169.51')
+        document=protocol.seal(xml,self.key,self.r['dps_id'],'dps')
+        reservation={**self.r,'estado':'enviando',**{'dps_xml_'+k:v for k,v in document.items()}}
+        with patch.object(w,'Transport') as transport:
+            with self.assertRaises(ValueError):
+                w.execute({'action':'transmitir','key':base64.b64encode(self.key).decode(),
+                           'record':self.record,'reservation':reservation})
+        transport.assert_not_called()

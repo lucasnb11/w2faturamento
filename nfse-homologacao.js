@@ -35,8 +35,8 @@
     if(Array.isArray(s.erros_codigos)&&s.erros_codigos.includes('E0008'))text('E0008: a API considerou a data/hora de emissão da DPS posterior à do processamento. Consulte o retorno desta tentativa; o XML assinado e o histórico serão preservados, sem reenvio automático.');
     if(s.chave_acesso)text(`Chave da NFS-e de homologação: ${s.chave_acesso}`);
     if(state==='pendente_consulta'||state==='enviando')text('O envio não será repetido. Consulte o retorno para conciliar esta DPS.');
-    if(result.nova_tentativa_disponivel===true)text('A última consulta retornou 404. É possível reservar outra numeração de teste com confirmação; o servidor fará nova consulta antes de reservar. A DPS anterior continuará preservada.');
-    if(state==='rejeitada')text('A API rejeitou a assinatura ou o certificado. A tentativa foi preservada para análise; não há reenvio automático.');
+    if(result.nova_tentativa_disponivel===true)text('É possível reservar outra numeração de teste após confirmar a ação. O servidor consultará o identificador anterior e exigirá HTTP 404 antes de reservar. A DPS anterior continuará preservada.');
+    if(state==='rejeitada')text(s.erros_codigos?.includes('E0714')?'E0714: arquivo enviado com erro na assinatura. A tentativa e seu XML foram preservados; a criação de outra DPS exige confirmação e nova consulta 404.':'A API rejeitou a assinatura ou o certificado. A tentativa foi preservada para análise; não há reenvio automático.');
     if(state==='assinada')text('Assinatura conferida localmente. A aceitação fiscal ainda será validada pela API de homologação.');
     if(result.pendencias?.length){text('Confira e salve os dados fiscais antes de preparar a DPS. Nenhum novo número foi reservado.');const list=document.createElement('ul');for(const issue of result.pendencias){const item=document.createElement('li');item.textContent=issue.mensagem;list.append(item)}root.append(list)}
     const actions=document.createElement('div');actions.className='nf-buttons';actions.append(
