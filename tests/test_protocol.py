@@ -59,7 +59,7 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):verify_homologation_dps(self.dps,self.cert,expected_dps_id=self.reservation['dps_id'],profile=EXCLUSIVE)
         signature=etree.fromstring(self.dps).find('{'+DS+'}Signature')
         self.cert.public_key().verify(base64.b64decode(signature.find('{'+DS+'}SignatureValue').text),
-            etree.tostring(signature.find('{'+DS+'}SignedInfo'),method='c14n',exclusive=False,with_comments=False),padding.PKCS1v15(),hashes.SHA1())
+            etree.tostring(etree.fromstring(etree.tostring(signature.find('{'+DS+'}SignedInfo'),with_tail=False)),method='c14n',exclusive=False,with_comments=False),padding.PKCS1v15(),hashes.SHA1())
     def test_authorization_matches_signed_dps_and_official_xsd(self):
         p.nfse_schema().assertValid(etree.fromstring(self.nfse))
         xml,key=p.validate_authorization(self.response,self.dps,self.reservation['dps_id'])

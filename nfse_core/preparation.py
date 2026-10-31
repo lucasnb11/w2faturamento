@@ -48,7 +48,7 @@ def build_reserved_dps(reservation, now=None):
     root = build_simulation(deepcopy(snapshot), now)
     info = root.find('{' + NS + '}infDPS')
     info.set('Id', identifier)
-    for name, value in [('serie', series), ('nDPS', number), ('verAplic', 'W2-2.11.4-HOMO')]:
+    for name, value in [('serie', series), ('nDPS', number), ('verAplic', 'W2-2.11.5-HOMO')]:
         info.find('{' + NS + '}' + name).text = str(value)
     schema().assertValid(root)
     return etree.tostring(root, encoding='UTF-8', xml_declaration=True, pretty_print=False)

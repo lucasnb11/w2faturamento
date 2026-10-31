@@ -37,7 +37,11 @@ def metadata(reservation):
 
 
 def retry_available(reservation):
-    if not reservation or reservation.get('estado') != 'pendente_consulta' or reservation.get('retorno_http') != 404:
+    if not reservation:
+        return False
+    pending_404 = reservation.get('estado') == 'pendente_consulta' and reservation.get('retorno_http') == 404
+    rejected_signature = reservation.get('estado') == 'rejeitada' and reservation.get('retorno_http') in (400, 422) and reservation.get('erros_codigos') == ['E0714']
+    if not (pending_404 or rejected_signature):
         return False
     try:
         created = datetime.fromisoformat(reservation['created_at'].replace('Z', '+00:00'))

@@ -40,7 +40,19 @@ def _canonical(node, profile):
     if not isinstance(profile, str) or profile not in PROFILES:
         raise SignatureError('Perfil de canonicalização não suportado.')
     exclusive, comments = PROFILES[profile]
-    return etree.tostring(node, method='c14n', exclusive=exclusive, with_comments=comments)
+    # Normaliza o contexto de namespace antes do C14N do subconjunto. Na versão
+    # fixada do libxml2, C14N direto de um descendente anexado pode introduzir
+    # xmlns="" espúrio. O roundtrip retém os namespaces em escopo e exclui tail.
+    detached = etree.fromstring(etree.tostring(node, with_tail=False),
+        etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False))
+    if not exclusive:
+        # C14N 1.0 inclui atributos xml:* herdados, com precedência do ancestral
+        # mais próximo; a serialização do subconjunto não os copia sozinha.
+        for ancestor in node.iterancestors():
+            for name, value in ancestor.attrib.items():
+                if name.startswith('{http://www.w3.org/XML/1998/namespace}') and name not in detached.attrib:
+                    detached.set(name, value)
+    return etree.tostring(detached, method='c14n', exclusive=exclusive, with_comments=comments)
 
 
 def _algorithms(suite, profile):

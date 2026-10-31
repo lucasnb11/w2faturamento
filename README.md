@@ -1,4 +1,4 @@
-# W2 Faturamento · versão 2.11.4
+# W2 Faturamento · versão 2.11.5
 
 Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fechamentos por quinzena, importação de CAFs/AWBs, pagamentos por cidade e acesso por perfil no Supabase.
 
@@ -42,3 +42,7 @@ A versão 2.11.2 acrescenta um cenário documental explicitamente selecionado pa
 A versão 2.11.3 representa dhEmi com o offset explícito -03:00, preservando o instante do relógio do servidor, e explica E0008 na tela. Não subtrai horas do instante real nem altera competência, XML já assinado, reserva, histórico ou política de reenvio. A necessidade dessa representação na API ainda exige recepção real; E0008 informa data/hora posterior ao processamento, sem comprovar isoladamente a causa no relógio ou no fuso.
 
 A versão 2.11.4 permite reservar explicitamente outra tentativa de homologação após consulta 404, confirmação do administrador, nova consulta GET 404 no servidor e intervalo mínimo de três minutos do envio anterior. Cria outra linha e outro identificador, preservando integralmente a tentativa antiga. Não assina nem transmite nessa ação. Aplicar antes a migração privada `sql/nfse_v2_11_4_tentativas.sql`.
+
+A versão 2.11.5 corrige a canonicalização de subconjuntos XML usados na assinatura: normaliza o contexto de namespaces em uma cópia antes do C14N e preserva atributos xml:* herdados no perfil inclusivo. O XML transmitido não é reescrito depois de assinado. Mantém algoritmos e perfis existentes; não altera certificados, tributos ou documentos anteriores. Inclui testes independentes com Java 17 (somente QA, sem dependência em produção).
+
+A retomada explícita também aceita rejeição isolada E0714/HTTP 400 ou 422, sempre após novo GET 404 no servidor e com os mesmos controles transacionais da versão anterior. Aplicar `sql/nfse_v2_11_5_assinatura.sql` antes de publicar. Não reserva nem envia automaticamente.
