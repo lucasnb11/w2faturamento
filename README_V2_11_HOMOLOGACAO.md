@@ -97,3 +97,5 @@ Fontes: Anexo I de homologação 20/10/2026 (E0714) e Canonical XML 1.0, https:/
 O botão de conexão passa a apresentar um resumo limitado dos parâmetros públicos de convênio municipal e metadados das rotas GET de alíquotas declaradas pelo Swagger do ADN. Não retorna documentos, A1, dados de contribuinte ou texto livre da resposta. Mantém os destinos de homologação, mTLS e somente leitura. A tela explica E0429 como código fiscal, distinto de HTTP 429.
 
 Esta versão de diagnóstico não corrige nem presume a causa da rejeição E0429 da tentativa 3. Os parâmetros de município e competência ainda precisam ser confrontados com o cenário documental. Não altera tributos, rascunhos, reservas ou XMLs históricos e não transmite automaticamente.
+
+A versão 2.11.7 acrescenta GET ao histórico de alíquotas do serviço 260101 no município 1500800, por rota observada no Swagger do ADN. A resposta é resumida e não altera dados, reserva ou transmissão. Lista JSON também é aceita somente no leitor de parâmetros municipais.
