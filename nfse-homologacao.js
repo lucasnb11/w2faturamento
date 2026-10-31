@@ -30,6 +30,7 @@
     if(s.dps_id)text(`DPS: ${s.dps_id} · Série ${s.serie} · Número ${s.numero}.`);
     if(s.retorno_http)text(`Último retorno da API: HTTP ${s.retorno_http}.`);
     if(Array.isArray(s.erros_codigos)&&s.erros_codigos.length)text(`Códigos: ${s.erros_codigos.join(', ')}.`);
+    if(Array.isArray(s.erros_codigos)&&s.erros_codigos.includes('E0008'))text('E0008: a API considerou a data/hora de emissão da DPS posterior à do processamento. Consulte o retorno desta tentativa; o XML assinado e o histórico serão preservados, sem reenvio automático.');
     if(s.chave_acesso)text(`Chave da NFS-e de homologação: ${s.chave_acesso}`);
     if(state==='pendente_consulta'||state==='enviando')text('O envio não será repetido. Consulte o retorno para conciliar esta DPS.');
     if(state==='rejeitada')text('A API rejeitou a assinatura ou o certificado. A tentativa foi preservada para análise; não há reenvio automático.');

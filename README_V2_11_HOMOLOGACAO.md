@@ -55,3 +55,13 @@ Para este modelo, pAliq e IBSCBS não constam na DPS de referência. As novas op
 O modo e o aviso acompanham a validação e as operações; em uma DPS já reservada, o status usa o snapshot imutável. Não há parâmetro que habilite produção. As ações de reservar, assinar e transmitir continuam separadas, administrativas, com confirmação específica para envio. Publicar o código não reserva números e não envia a DPS. Não há migração de schema nesta versão.
 
 Validação: 90 testes Python, quatro conjuntos JavaScript e fluxo em Chromium com persistência simulada. Incluem modo desativado/incompleto, origem ausente, ausência documental versus não aplicabilidade, confirmações preservadas, coerência fiscal obrigatória, aviso com snapshot anterior, edição, reaproveitamento e prévia. A validação local do rascunho histórico 1QMAIO26 com o perfil de referência passou no XSD; nenhuma reserva, assinatura ou transmissão real foi executada por essa validação.
+
+## Data/hora e E0008 (2.11.3)
+
+O Anexo I de homologação 20/10/2026 define E0008 para dhEmi posterior a dhProc. O registro da tentativa retornou HTTP 400/E0008, sem autorização conferida. A DPS construída pela versão anterior representava dhEmi em UTC (+00:00). Isso não comprova isoladamente erro de fuso, relógio ou da API.
+
+A construção de novas DPS passa a representar o mesmo instante do relógio do servidor com offset explícito -03:00. A validação de competência usa o mesmo dia local; datetimes sem fuso são rejeitados. Não há retroação artificial de horas, alteração da competência, reconstrução de XML já assinado ou reenvio automático. A tela explica E0008 e orienta a conciliação por GET. A política de estados da tentativa existente permanece intacta.
+
+Validação: 91 testes Python e teste JavaScript da homologação. Incluem mudança de dia 02:37 UTC para 23:37 -03:00, igualdade do instante, competência preservada, XSD, recusa de datetime sem fuso e E0008 exibido com transmissão bloqueada. A aceitação dessa representação pela API precisa de nova recepção controlada após conciliar a tentativa anterior.
+
+Fonte: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/producao-restrita/anexo_i-sefin_adn-dps_nfse-snnfse_prodrest-v1-01-20261020.xlsx

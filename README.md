@@ -1,4 +1,4 @@
-# W2 Faturamento · versão 2.11.2
+# W2 Faturamento · versão 2.11.3
 
 Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fechamentos por quinzena, importação de CAFs/AWBs, pagamentos por cidade e acesso por perfil no Supabase.
 
@@ -38,3 +38,5 @@ Logomarca da prévia: arquivo público disponibilizado no [Portal Nacional da NF
 A versão 2.11.1 corrige o reaproveitamento do cadastro fiscal: bases integrais e ISS são recalculados em centavos para o novo valor. Valores fixos não zerados, bases reduzidas e descontos diferentes de zero exigem revisão, em vez de serem copiados. A origem documental é preservada ao editar e salvar. O reaproveitamento não confirma a validação contábil nem a competência e não altera o fluxo de transmissão.
 
 A versão 2.11.2 acrescenta um cenário documental explicitamente selecionado para homologação. Com fonte identificada e uso exclusivo de testes, a DPS pode reproduzir a ausência de pAliq e IBSCBS da nota de referência sem marcar confirmações contábeis. As demais verificações de dados e o XSD continuam obrigatórios. O servidor identifica o modo em todas as etapas; não existe emissão em produção nesta aplicação.
+
+A versão 2.11.3 representa dhEmi com o offset explícito -03:00, preservando o instante do relógio do servidor, e explica E0008 na tela. Não subtrai horas do instante real nem altera competência, XML já assinado, reserva, histórico ou política de reenvio. A necessidade dessa representação na API ainda exige recepção real; E0008 informa data/hora posterior ao processamento, sem comprovar isoladamente a causa no relógio ou no fuso.
