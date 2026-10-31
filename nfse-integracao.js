@@ -66,6 +66,9 @@
       text(root,result.consulta_convenio_rota_confirmada?`Consulta municipal pela rota declarada no ADN: ${result.consulta_convenio_rota} · HTTP ${result.consulta_convenio_http??'sem resposta'}.`:'A rota de consulta do convênio municipal ainda não foi identificada na documentação do ADN.');
       if(Array.isArray(result.consulta_convenio_erro_codigos)&&result.consulta_convenio_erro_codigos.length)text(root,`Códigos retornados pela API municipal: ${result.consulta_convenio_erro_codigos.join(', ')}.`);
       for(const item of result.consulta_convenio_resumo||[])text(root,`Parâmetro municipal · ${item.campo}: ${item.valor}.`);
+      if(result.historico_aliquotas_http)text(root,`Histórico de alíquotas do serviço 26.01.01 em Ananindeua: HTTP ${result.historico_aliquotas_http}.`);
+      for(const item of result.historico_aliquotas_resumo||[])text(root,`Histórico ISS · ${item.campo}: ${item.valor}.`);
+      if(result.historico_aliquotas_codigos?.length)text(root,`Histórico ISS · códigos: ${result.historico_aliquotas_codigos.join(', ')}.`);
       for(const item of result.parametros_rotas_leitura||[])text(root,`Consulta de parâmetros disponível: ${item.rota} · ${item.parametros.map(p=>`${p.nome} (${p.local}${p.obrigatorio?', obrigatório':''})`).join(', ')}.`);
       text(root,result.contrato_recepcao_identificado?'Campo de recepção identificado na documentação retornada pela API.':'O contrato de recepção ainda não foi confirmado pela documentação da API.');
       text(root,result.a1_prova_assinatura_local===true?'A1: assinatura de desafio aleatório conferida localmente. Este teste não assina DPS e não valida o perfil XMLDSig da API.':'A prova local de assinatura com o A1 ainda não foi confirmada.');

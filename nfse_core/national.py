@@ -104,7 +104,8 @@ def _read_service(context, path, service):
     parameter_path = (isinstance(path, str) and bool(re.fullmatch(r'/[A-Za-z0-9_/-]{1,180}', path))
         and '//' not in path and bool(re.search(r'(^|/)1500800(/|$)', path))
         and any(word in path.lower() for word in ('municip', 'conven')))
-    if path not in DOCS and not (service == 'parametros' and parameter_path):
+    rate_history = path == '/1500800/260101/historicoaliquotas'
+    if path not in DOCS and not (service == 'parametros' and (parameter_path or rate_history)):
         raise NationalError('Consulta fora do escopo do diagnóstico.')
     host, prefix = (HOST, BASE) if service == 'sefin' else (PARAM_HOST, PARAM_BASE)
     connection = http.client.HTTPSConnection(host, timeout=6, context=context)
@@ -119,7 +120,7 @@ def _read_service(context, path, service):
             raise NationalError(ERRORS['API_RESPOSTA_GRANDE'], 'API_RESPOSTA_GRANDE')
         try:
             result = json.loads(body)
-            return response.status, result if isinstance(result, dict) else None
+            return response.status, result if isinstance(result, dict) or (service == 'parametros' and isinstance(result, list)) else None
         except (ValueError, UnicodeError):
             return response.status, None
     except NationalError:
@@ -246,6 +247,11 @@ def diagnostic_worker(record, key):
             break
     route = parameter_endpoint(parameters_document) if parameters_document else None
     status, convenio = read_parameters(context, route) if route else (None, None)
+    history_path = '/{codigoMunicipio}/{codigoServico}/historicoaliquotas'
+    history_operation = (parameters_document or {}).get('paths', {}).get(history_path, {}).get('get')
+    history_status, history = (None, None)
+    if isinstance(history_operation, dict):
+        history_status, history = read_parameters(context, '/1500800/260101/historicoaliquotas')
     return {'ambiente': 'homologacao', 'conexao_tls_respondeu': True,
         'documentacao_http': docs_status, 'contrato_recepcao_identificado': bool(document and inspect_contract(document)),
         'contrato_sha256': hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':')).encode()).hexdigest() if document else None,
@@ -257,6 +263,9 @@ def diagnostic_worker(record, key):
         'consulta_convenio_http': status, 'consulta_convenio_recebida': status == 200 and convenio is not None,
         'parametros_rotas_leitura': parameter_routes(parameters_document),
         'consulta_convenio_resumo': parameter_summary(convenio) if status == 200 else [],
+        'historico_aliquotas_http': history_status,
+        'historico_aliquotas_resumo': parameter_summary(history) if history_status == 200 else [],
+        'historico_aliquotas_codigos': error_codes(history) if history_status != 200 else [],
         'a1_prova_assinatura_local': proof,
         'perfil_assinatura_dps_validado': False,
         'transmitido': False, 'emissao_oficial_disponivel': False,
@@ -365,7 +374,8 @@ def diagnose_connection(config):
         allowed = ['ambiente','conexao_tls_respondeu','documentacao_http','contrato_recepcao_identificado','contrato_sha256','consulta_convenio_http','consulta_convenio_recebida','transmitido','emissao_oficial_disponivel',
             'parametros_servico','parametros_documentacao_http','consulta_convenio_rota','consulta_convenio_rota_confirmada','consulta_convenio_erro_codigos',
             'a1_prova_assinatura_local','perfil_assinatura_dps_validado']
-        allowed += ['parametros_rotas_leitura', 'consulta_convenio_resumo']
+        allowed += ['parametros_rotas_leitura', 'consulta_convenio_resumo',
+            'historico_aliquotas_http', 'historico_aliquotas_resumo', 'historico_aliquotas_codigos']
         clean = {name: data.get(name) for name in allowed}
         clean['aviso'] = 'Diagnóstico de leitura. A resposta HTTP não comprova habilitação fiscal. Nenhuma DPS foi assinada ou enviada.'
         return clean

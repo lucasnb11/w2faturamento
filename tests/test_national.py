@@ -83,6 +83,18 @@ class NationalTests(unittest.TestCase):
         self.assertEqual(len(routes),1)
         self.assertEqual(routes[0]['rota'],'/parametros_municipais/{codigoMunicipio}/convenio')
 
+    def test_rate_history_is_read_only_for_fixed_service_and_declared_route(self):
+        doc=parameters_swagger()
+        doc['paths']['/{codigoMunicipio}/{codigoServico}/historicoaliquotas']={'get':{}}
+        with patch.object(national,'read_official',return_value=(200,swagger())),patch.object(national,'read_parameters',side_effect=[
+            (200,doc),(200,{}),(200,[{'aliquota':0,'dataInicio':'2026-01-01','cnpj':'private'}])]) as read:
+            result=national.diagnostic_worker(self.record,self.key)
+        self.assertEqual(read.call_args_list[-1].args[1],'/1500800/260101/historicoaliquotas')
+        self.assertEqual(result['historico_aliquotas_http'],200)
+        self.assertIn({'campo':'[0].aliquota','valor':0},result['historico_aliquotas_resumo'])
+        self.assertNotIn('private',str(result))
+        self.assertFalse(result['transmitido'])
+
     def test_parameters_route_is_declared_unique_and_needs_no_extra_query(self):
         doc=parameters_swagger()
         self.assertEqual(national.parameter_endpoint(doc),national.CONVENIO)
