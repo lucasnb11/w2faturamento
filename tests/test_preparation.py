@@ -48,6 +48,19 @@ class PreparationTests(unittest.TestCase):
         self.assertFalse(root.xpath('//*[local-name()="Signature"]'))
         self.assertEqual(reservation, before)
 
+    def test_emission_time_uses_brasilia_without_backdating_the_instant(self):
+        instant = datetime(2026, 10, 31, 2, 37, 52, tzinfo=timezone.utc)
+        reservation = self.reservation()
+        root = etree.fromstring(build_reserved_dps(reservation, instant))
+        emitted = root[0].find('{' + NS + '}dhEmi').text
+        self.assertEqual(emitted, '2026-10-30T23:37:52-03:00')
+        self.assertEqual(datetime.fromisoformat(emitted).astimezone(timezone.utc), instant)
+        self.assertEqual(root[0].find('{' + NS + '}dCompet').text, '2026-05-01')
+        self.assertEqual(root[0].find('{' + NS + '}tpAmb').text, '2')
+        schema().assertValid(root)
+        with self.assertRaises(ValueError):
+            build_reserved_dps(reservation, datetime(2026, 10, 31, 2, 37, 52))
+
     def test_no_rebuilding_transmitted_reservation_or_stale_version(self):
         for changes in [{'serie': 70000}, {'numero': True}, {'dps_id': 'DPS-wrong'},
                         {'rascunho_versao': 'old'}, {'rascunho_id': 2},

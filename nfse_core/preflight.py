@@ -3,7 +3,7 @@
 Não reserva número, não assina e não envia DPS. Validação XSD não é autorização
 fiscal nem validação das regras de negócio municipais/nacionais.
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
@@ -15,6 +15,7 @@ NS = 'http://www.sped.fazenda.gov.br/nfse'
 CNPJ = '46167015000140'
 TOMADOR = '73939449000193'
 MUNICIPIO = '1500800'
+BRASILIA = timezone(timedelta(hours=-3))
 SCHEMA_PATH = Path(__file__).parent / 'schemas' / 'homologacao_20261020' / 'DPS_v1.01.xsd'
 SCHEMA_SOURCE = 'https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/producao-restrita/esquemas_prod_restrita_20261020.zip'
 REFERENCE_RATE = 'Omitir como na DPS de referência · homologação'
@@ -51,7 +52,7 @@ def amount(value):
 
 
 def check_draft(row, today=None):
-    today = today or date.today()
+    today = today or datetime.now(BRASILIA).date()
     f = row.get('dados_fiscais')
     if not isinstance(f, dict):
         f = {}
@@ -150,14 +151,17 @@ def element(parent, name, text=None):
 def build_simulation(row, now=None):
     """XML não assinado com numeração fictícia, exclusivamente para validar XSD."""
     now = now or datetime.now(timezone.utc)
-    issues = check_draft(row, now.date())
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError('A data de emissão exige fuso horário explícito.')
+    local_now = now.astimezone(BRASILIA)
+    issues = check_draft(row, local_now.date())
     if issues:
         raise ValueError('Dados fiscais pendentes')
     f = row['dados_fiscais']
     root = etree.Element('{' + NS + '}DPS', nsmap={None: NS}, versao='1.01')
     info = element(root, 'infDPS')
     info.set('Id', 'DPS' + MUNICIPIO + '2' + CNPJ + '00000' + '000000000000001')
-    for name, text in [('tpAmb', '2'), ('dhEmi', now.astimezone(timezone.utc).isoformat(timespec='seconds')), ('verAplic', 'W2-2.8-preflight'), ('serie', '0'), ('nDPS', '1'), ('dCompet', f['competencia']), ('tpEmit', '1'), ('finNFSe', '0'), ('cLocEmi', MUNICIPIO)]:
+    for name, text in [('tpAmb', '2'), ('dhEmi', local_now.isoformat(timespec='seconds')), ('verAplic', 'W2-2.8-preflight'), ('serie', '0'), ('nDPS', '1'), ('dCompet', f['competencia']), ('tpEmit', '1'), ('finNFSe', '0'), ('cLocEmi', MUNICIPIO)]:
         element(info, name, text)
 
     def address(person, prefix):
@@ -241,7 +245,7 @@ def inspect(row, today=None):
     if pending:
         return result
     try:
-        now = datetime.now(timezone.utc) if today is None else datetime.combine(today, datetime.min.time(), timezone.utc)
+        now = datetime.now(timezone.utc) if today is None else datetime.combine(today, datetime.min.time(), BRASILIA)
         document = build_simulation(row, now)
         validator = schema()
         validator.assertValid(document)
