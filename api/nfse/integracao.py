@@ -75,7 +75,7 @@ class handler(BaseHTTPRequestHandler):
             if not valid:
                 result['pendencias'].insert(0, {'campo': 'a1', 'mensagem': 'Cadastre um A1 da W2 dentro da validade.'})
             result['proximas_etapas'] = ['Conferir enquadramento e regras de negócio municipais/nacionais.',
-                'Implementar reserva atômica de numeração, assinatura e transmissão com reconciliação por DPS.',
+                'Usar a ação Homologação para preparar a DPS e testar a transmissão com conciliação por identificador.',
                 'Concluir homologação antes de habilitar produção.']
             self._respond_json(200, result)
         except SafeError as exc:
