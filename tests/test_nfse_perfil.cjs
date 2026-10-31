@@ -28,3 +28,6 @@ assert.equal(recalculate({...row.dados_fiscais,iss_aliquota:'6'},row.valor_rem,'
 assert.equal(recalculate({...row.dados_fiscais,iss_aliquota:'2,50'},row.valor_rem,'10000').iss_valor,'250,00');
 assert.equal(recalculate(row.dados_fiscais,row.valor_rem,'0').iss_base,'');
 console.log('OK: perfil mantém referência, não confirma fiscal e recalcula bases integrais/ISS com arredondamento decimal.');
+
+const reference=reuse({...row,dados_fiscais:{...row.dados_fiscais,homologacao_por_referencia:true,fonte_referencia_homologacao:'Nota sintética'}},'10000','2026-06-01');
+assert.equal(reference.homologacao_por_referencia,true);assert.equal(reference.fonte_referencia_homologacao,'Nota sintética');assert.equal(reference.fiscal_confirmado,false);

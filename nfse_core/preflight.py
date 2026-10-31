@@ -17,6 +17,20 @@ TOMADOR = '73939449000193'
 MUNICIPIO = '1500800'
 SCHEMA_PATH = Path(__file__).parent / 'schemas' / 'homologacao_20261020' / 'DPS_v1.01.xsd'
 SCHEMA_SOURCE = 'https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/producao-restrita/esquemas_prod_restrita_20261020.zip'
+REFERENCE_RATE = 'Omitir como na DPS de referência · homologação'
+REFERENCE_IBS = 'Não informado na nota de referência · homologação'
+REFERENCE_NOTICE = ('Cenário documental de homologação confirmado pelo usuário. '
+                    'Reproduz as notas de referência sem declarar validação contábil, '
+                    'não aplicabilidade de IBS/CBS ou autorização para emissão em produção.')
+
+
+def reference_mode(row):
+    """Opt-in salvo no snapshot; aplicável somente aos construtores de tpAmb=2."""
+    f = row.get('dados_fiscais') or {}
+    return (isinstance(f, dict) and f.get('homologacao_por_referencia') is True
+            and f.get('uso_exclusivo_homologacao') is True
+            and isinstance(f.get('fonte_referencia_homologacao'), str)
+            and 1 <= len(f['fonte_referencia_homologacao'].strip()) <= 1000)
 
 
 def digits(value):
@@ -41,6 +55,7 @@ def check_draft(row, today=None):
     f = row.get('dados_fiscais')
     if not isinstance(f, dict):
         f = {}
+    reference = reference_mode(row)
     pending = []
 
     def need(code, label, valid):
@@ -50,6 +65,8 @@ def check_draft(row, today=None):
     need('emitente_cnpj', 'O prestador deve ser a W2 Transportes.', row.get('emitente_cnpj', CNPJ) == CNPJ)
     need('tomador_cnpj', 'Confira o CNPJ da Total Express.', digits(row.get('tomador_cnpj')) == TOMADOR and digits(f.get('tomador_cnpj')) == TOMADOR)
     need('tomador_nome', 'Confira a razão social do tomador no rascunho e no cadastro fiscal.', bool(row.get('tomador_nome')) and row.get('tomador_nome') == f.get('tomador_nome'))
+    if f.get('homologacao_por_referencia') is True:
+        need('homologacao_por_referencia', 'Identifique a nota de referência e confirme o uso exclusivo em homologação.', reference)
     for key, label in [
         ('prestador_endereco_confirmado', 'Confirme endereço e número da W2.'),
         ('tomador_confirmado', 'Confirme o cadastro da Total Express.'),
@@ -57,8 +74,8 @@ def check_draft(row, today=None):
         ('competencia_confirmada', 'Confirme a data real de início da prestação.'),
         ('consolidacao_confirmada', 'Confirme a regra contábil para esta cobrança por quinzena.'),
     ]:
-        need(key, label, f.get(key) is True)
-    need('orientacao_contabil', 'Registre a referência da orientação contábil (responsável, data e fundamento da consolidação).', bool(str(f.get('orientacao_contabil', '')).strip()))
+        need(key, label, reference or f.get(key) is True)
+    need('orientacao_contabil', 'Registre a referência da orientação contábil (responsável, data e fundamento da consolidação).', reference or bool(str(f.get('orientacao_contabil', '')).strip()))
     try:
         competence = date.fromisoformat(f.get('competencia', ''))
         valid_date = competence <= today and competence.year == int(row['ano']) and competence.month == int(row['mes']) and (1 if competence.day <= 15 else 2) == int(row['quinzena'])
@@ -75,7 +92,7 @@ def check_draft(row, today=None):
     need('regime_especial', 'Confirme o regime especial. Esta etapa atende somente Nenhum.', f.get('regime_especial') == 'Nenhum')
     need('iss_tipo', 'Esta etapa atende somente operação tributável de ISS.', f.get('iss_tipo') == 'Operação tributável')
     need('iss_retencao', 'Confirme se o ISS é retido pelo tomador ou não retido.', f.get('iss_retencao') in ['Não retido', 'Retido pelo tomador'])
-    need('aliquota_xml', 'Confirme se a alíquota deve ser informada na DPS ou obtida da parametrização municipal.', f.get('aliquota_xml') in ['Informar na DPS', 'Não informar conforme regra municipal'])
+    need('aliquota_xml', 'Defina o preenchimento da alíquota na DPS; a reprodução documental exige o modo de referência de homologação.', (not reference and f.get('aliquota_xml') in ['Informar na DPS', 'Não informar conforme regra municipal']) or (reference and f.get('aliquota_xml') == REFERENCE_RATE))
     rate = amount(f.get('iss_aliquota'))
     need('iss_aliquota', 'Informe a alíquota do ISS confirmada pelo contador, entre 0 e 5%.', rate is not None and rate <= 5)
     need('total_tributos_sn', 'Remova o percentual do Simples: a W2 não é optante.', not str(f.get('total_tributos_sn', '')).strip())
@@ -113,7 +130,7 @@ def check_draft(row, today=None):
     need('municipio_incidencia_ibge', 'Esta etapa contempla somente incidência do ISS em Ananindeua. A incidência será verificada também pelas regras da API.', f.get('municipio_incidencia_ibge') == MUNICIPIO)
     need('intermediario', 'Esta etapa contempla somente operação sem intermediário.', not any(f.get(k) for k in ['intermediario_nome', 'intermediario_documento', 'intermediario_email']))
     treatment = f.get('ibscbs_tratamento')
-    need('ibscbs_tratamento', 'Confirme o tratamento de IBS/CBS na competência.', treatment in ['Informado conforme validação contábil', 'Não aplicável conforme validação contábil'])
+    need('ibscbs_tratamento', 'Confirme o tratamento de IBS/CBS na competência; a ausência documental só é aceita no modo de referência de homologação.', (not reference and treatment in ['Informado conforme validação contábil', 'Não aplicável conforme validação contábil']) or (reference and treatment == REFERENCE_IBS))
     if treatment == 'Informado conforme validação contábil':
         for key, size in [('cst', 3), ('cclass', 6), ('indicador_operacao', 6)]:
             need(key, f'Confirme {key}: são necessários {size} dígitos.', bool(re.fullmatch(r'[0-9]{' + str(size) + r'}', str(f.get(key, '')))))
@@ -218,6 +235,9 @@ def inspect(row, today=None):
               'schema': '1.01-homologacao-20261020', 'schema_fonte': SCHEMA_SOURCE,
               'pendencias': pending, 'xsd_valido': False,
               'aviso': 'Validação local com numeração fictícia. Não assina, não transmite e não autoriza NFS-e.'}
+    result['modo_validacao'] = 'referencia_documental' if reference_mode(row) else 'confirmacoes_fiscais'
+    if reference_mode(row):
+        result['aviso'] += ' ' + REFERENCE_NOTICE
     if pending:
         return result
     try:
