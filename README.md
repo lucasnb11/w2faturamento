@@ -1,4 +1,4 @@
-# W2 Faturamento · versão 2.11.0
+# W2 Faturamento · versão 2.11.1
 
 Sistema de faturamento e acompanhamento de entregas da W2 Transportes, com fechamentos por quinzena, importação de CAFs/AWBs, pagamentos por cidade e acesso por perfil no Supabase.
 
@@ -28,8 +28,11 @@ Certificados, senhas e chaves secretas não pertencem ao repositório. Não subs
 python3 -m pip install -r requirements.txt
 python3 -m unittest discover -s tests -v
 node tests/test_a1_frontend.cjs
+node tests/test_nfse_perfil.cjs
 ```
 
 Os scripts SQL versionados documentam a estrutura. Publicar o código não executa migrações automaticamente.
 
 Logomarca da prévia: arquivo público disponibilizado no [Portal Nacional da NFS-e](https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/logos-da-nfs-e). A interface referencia a imagem oficial por HTTPS; não publica imagens extraídas de documentos anexados pelo usuário.
+
+A versão 2.11.1 corrige o reaproveitamento do cadastro fiscal: bases integrais e ISS são recalculados em centavos para o novo valor. Valores fixos não zerados, bases reduzidas e descontos diferentes de zero exigem revisão, em vez de serem copiados. A origem documental é preservada ao editar e salvar. O reaproveitamento não confirma a validação contábil nem a competência e não altera o fluxo de transmissão.
