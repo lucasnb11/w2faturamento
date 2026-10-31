@@ -74,6 +74,8 @@ class NationalTests(unittest.TestCase):
         self.assertNotIn('private',str(summary))
         self.assertIn({'campo':'situacao','valor':'ATIVO'},summary)
         self.assertIn({'campo':'aliquotas[0].aliquota','valor':5},summary)
+        self.assertIn({'campo':'aliquotas.26.01.01.000[0].aliquota','valor':5},
+            national.parameter_summary({'aliquotas':{'26.01.01.000':[{'aliquota':5}]}}))
 
     def test_parameter_discovery_cannot_return_external_or_write_routes(self):
         doc=parameters_swagger()
@@ -89,7 +91,7 @@ class NationalTests(unittest.TestCase):
         with patch.object(national,'read_official',return_value=(200,swagger())),patch.object(national,'read_parameters',side_effect=[
             (200,doc),(200,{}),(200,[{'aliquota':0,'dataInicio':'2026-01-01','cnpj':'private'}])]) as read:
             result=national.diagnostic_worker(self.record,self.key)
-        self.assertEqual(read.call_args_list[-1].args[1],'/1500800/260101/historicoaliquotas')
+        self.assertEqual(read.call_args_list[-1].args[1],'/1500800/26.01.01.000/historicoaliquotas')
         self.assertEqual(result['historico_aliquotas_http'],200)
         self.assertIn({'campo':'[0].aliquota','valor':0},result['historico_aliquotas_resumo'])
         self.assertNotIn('private',str(result))

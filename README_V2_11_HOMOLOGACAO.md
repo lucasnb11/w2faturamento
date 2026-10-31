@@ -101,3 +101,5 @@ Esta versão de diagnóstico não corrige nem presume a causa da rejeição E042
 A versão 2.11.7 acrescenta GET ao histórico de alíquotas do serviço 260101 no município 1500800, por rota observada no Swagger do ADN. A resposta é resumida e não altera dados, reserva ou transmissão. Lista JSON também é aceita somente no leitor de parâmetros municipais.
 
 A versão 2.11.8 apresenta a mensagem de erro da consulta de parâmetros com limite de tamanho e remoção de identificadores; não registra respostas brutas ou dados do A1.
+
+A versão 2.11.9 corrige o código usado somente na consulta GET do histórico: 26.01.01.000 (serviço-base do cenário sem cTribMun). A resposta real anterior exigiu nove dígitos. O Guia do Painel Municipal v1.2, seção 3.5.3, descreve os seis dígitos nacionais separados por pontos e complemento 000 para serviço sem desdobramento. A consulta não declara que o município não possui especializações e não altera XML ou tributação. Fonte: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/guia-do-painel-administrativo-municipal-nfs-e-v1-2-out2025.pdf
