@@ -104,7 +104,7 @@ def _read_service(context, path, service):
     parameter_path = (isinstance(path, str) and bool(re.fullmatch(r'/[A-Za-z0-9_/-]{1,180}', path))
         and '//' not in path and bool(re.search(r'(^|/)1500800(/|$)', path))
         and any(word in path.lower() for word in ('municip', 'conven')))
-    rate_history = path == '/1500800/260101/historicoaliquotas'
+    rate_history = path == '/1500800/26.01.01.000/historicoaliquotas'
     if path not in DOCS and not (service == 'parametros' and (parameter_path or rate_history)):
         raise NationalError('Consulta fora do escopo do diagnóstico.')
     host, prefix = (HOST, BASE) if service == 'sefin' else (PARAM_HOST, PARAM_BASE)
@@ -251,7 +251,7 @@ def diagnostic_worker(record, key):
     history_operation = (parameters_document or {}).get('paths', {}).get(history_path, {}).get('get')
     history_status, history = (None, None)
     if isinstance(history_operation, dict):
-        history_status, history = read_parameters(context, '/1500800/260101/historicoaliquotas')
+        history_status, history = read_parameters(context, '/1500800/26.01.01.000/historicoaliquotas')
     return {'ambiente': 'homologacao', 'conexao_tls_respondeu': True,
         'documentacao_http': docs_status, 'contrato_recepcao_identificado': bool(document and inspect_contract(document)),
         'contrato_sha256': hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':')).encode()).hexdigest() if document else None,
@@ -297,7 +297,7 @@ def parameter_summary(document):
             return
         if isinstance(value, dict):
             for name, item in value.items():
-                if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_]{1,80}', name):
+                if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.]{1,80}', name):
                     continue
                 if re.search(r'cnpj|cpf|email|fone|token|senha|certific|responsavel|usuario', name, re.I):
                     continue
