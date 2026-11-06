@@ -54,6 +54,47 @@ class DocumentaryReferenceTests(unittest.TestCase):
                 self.assertEqual(root.xpath('//*[local-name()="vDescIncond"]/text()'),[unconditional.replace(',','.')])
                 self.assertEqual(root.xpath('//*[local-name()="vDescCond"]/text()'),[conditional.replace(',','.')])
 
+    def test_complete_dps_structure_matches_four_authorized_references(self):
+        # Contrato estrutural observado nos quatro XMLs fornecidos. Nenhum XML,
+        # identidade, chave de acesso ou conteúdo privado é incluído no teste.
+        # finNFSe é obrigatório no XSD de homologação atual; não existia nas
+        # referências. Ambiente, relógio, versão e numeração são próprios do app.
+        expected = set("""
+        tpAmb dhEmi verAplic serie nDPS dCompet tpEmit cLocEmi
+        prest/CNPJ prest/IM prest/regTrib/opSimpNac prest/regTrib/regEspTrib
+        toma/CNPJ toma/xNome toma/end/endNac/cMun toma/end/endNac/CEP
+        toma/end/xLgr toma/end/nro toma/end/xCpl toma/end/xBairro
+        serv/locPrest/cLocPrestacao serv/cServ/cTribNac serv/cServ/xDescServ
+        serv/cServ/cNBS serv/infoCompl/xInfComp valores/vServPrest/vServ
+        valores/trib/tribMun/tribISSQN valores/trib/tribMun/tpRetISSQN
+        valores/trib/tribFed/piscofins/CST valores/trib/tribFed/piscofins/vBCPisCofins
+        valores/trib/tribFed/piscofins/pAliqPis valores/trib/tribFed/piscofins/pAliqCofins
+        valores/trib/tribFed/piscofins/vPis valores/trib/tribFed/piscofins/vCofins
+        valores/trib/tribFed/piscofins/tpRetPisCofins
+        valores/trib/totTrib/pTotTrib/pTotTribFed
+        valores/trib/totTrib/pTotTrib/pTotTribEst
+        valores/trib/totTrib/pTotTrib/pTotTribMun
+        """.split())
+        row = documentary()
+        row['dados_fiscais'].update(tomador_complemento='Complemento sintético',
+                                    complementares='Informação sintética de teste.')
+        before = copy.deepcopy(row)
+        root = build_simulation(row, datetime(2026, 11, 6, tzinfo=timezone.utc))
+        from nfse_core.preflight import schema
+        schema().assertValid(root)
+        info = root[0]
+        actual = set()
+        for leaf in info.iter():
+            if len(leaf):
+                continue
+            parts = []; node = leaf
+            while node is not info:
+                parts.append(node.tag.split('}', 1)[1]); node = node.getparent()
+            actual.add('/'.join(reversed(parts)))
+        self.assertEqual(actual, expected | {'finNFSe'})
+        self.assertEqual(info.find('{'+NS+'}finNFSe').text, '0')
+        self.assertEqual(row, before)
+
     def test_opt_in_exclusivity_and_source_are_required(self):
         for field, value in [('homologacao_por_referencia', False),
                              ('homologacao_por_referencia', 'true'),
