@@ -37,6 +37,12 @@ class HomologationHttpTests(unittest.TestCase):
             self.assertEqual(self.call({'acao':'preparar','rascunho_id':2,'versao':'v',**extra})[0],400)
         for bad in [True,0,'2']:
             self.assertEqual(self.call({'acao':'preparar','rascunho_id':bad,'versao':'v'})[0],400)
+    def test_municipal_validation_accepts_only_draft_reference(self):
+        body={'acao':'validar_parametros','rascunho_id':2,'versao':'current'}
+        self.assertEqual(self.call(body)[0],200)
+        for extra in [{'competencia':'2026-01-01'},{'url':'https://evil.example'},{'ambiente':'producao'}]:
+            self.assertEqual(self.call({**body,**extra})[0],400)
+
     def test_transmission_requires_separate_explicit_confirmation(self):
         body={'acao':'transmitir','rascunho_id':2,'versao':'current'}
         self.assertEqual(self.call(body)[0],400)

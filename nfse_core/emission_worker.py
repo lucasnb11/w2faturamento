@@ -10,6 +10,7 @@ from nfse_core.preparation import build_reserved_dps
 from nfse_core.preflight import schema
 from nfse_core.protocol import identifier, pack, seal, unseal, validate_authorization, parse_xml
 from nfse_core.signature import sign_homologation_dps, verify_homologation_dps, INCLUSIVE, RSA_SHA1
+from nfse_core.municipal import validate_municipal
 
 
 class Transport:
@@ -94,6 +95,9 @@ def transmit(transport, xml, dps_id, key):
 def execute(payload):
     key = base64.b64decode(payload['key'], validate=True)
     reservation, action = payload['reservation'], payload['action']
+    if action == 'validar_parametros':
+        material = decrypt_material(payload['record'], key)
+        return {'parametros_iss': validate_municipal(tls_context(material), reservation['snapshot'])}
     dps_id = identifier(reservation['dps_id'])
     if action == 'baixar_xml':
         if reservation.get('estado') != 'autorizada':

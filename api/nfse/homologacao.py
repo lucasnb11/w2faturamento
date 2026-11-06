@@ -24,7 +24,7 @@ class handler(JsonHandler):
                 body = json.loads(self.rfile.read(int(length)))
             except Exception:
                 raise SafeError(400, 'DADOS_INVALIDOS', 'Requisição inválida.') from None
-            actions = {'status', 'preparar', 'transmitir', 'conciliar', 'baixar_xml', 'nova_tentativa'}
+            actions = {'status', 'preparar', 'transmitir', 'conciliar', 'baixar_xml', 'nova_tentativa', 'validar_parametros'}
             if not isinstance(body, dict) or not isinstance(body.get('acao'), str) or body['acao'] not in actions:
                 raise SafeError(400, 'ACAO_INVALIDA', 'Ação não permitida.')
             confirmations = {'transmitir': 'ENVIAR_SOMENTE_HOMOLOGACAO', 'nova_tentativa': 'NOVA_DPS_SOMENTE_HOMOLOGACAO'}

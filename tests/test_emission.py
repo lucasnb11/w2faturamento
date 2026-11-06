@@ -56,7 +56,7 @@ class EmissionTests(unittest.TestCase):
             if name=='nfse_iniciar_envio_homologacao':state['value']={**signed,'estado':'enviando'}
             elif name=='nfse_gravar_retorno_homologacao':state['value']={**state['value'],'estado':payload['p_novo']}
             return state['value']
-        with patch.object(e,'api_json',return_value=[self.r['snapshot']]),patch.object(e,'load',side_effect=lambda *_:state['value']),patch.object(e,'rpc',side_effect=rpc),patch.object(e,'worker',side_effect=SafeError(503,'TIMEOUT','interrompido')) as worker:
+        with patch.object(e,'municipal_check',return_value={'liberado':True}),patch.object(e,'api_json',return_value=[self.r['snapshot']]),patch.object(e,'load',side_effect=lambda *_:state['value']),patch.object(e,'rpc',side_effect=rpc),patch.object(e,'worker',side_effect=SafeError(503,'TIMEOUT','interrompido')) as worker:
             result=e.operate({},'admin',{**self.body,'acao':'transmitir'})
             self.assertEqual(result['situacao']['estado'],'pendente_consulta')
             with self.assertRaises(SafeError):e.operate({},'admin',{**self.body,'acao':'transmitir'})

@@ -33,7 +33,7 @@ class NewAttemptTests(unittest.TestCase):
     def test_explicit_retry_rechecks_absence_then_only_reserves(self):
         pending=self.pending();original=copy.deepcopy(pending)
         new={**self.r,'id':'new-id','estado':'reservada','numero':24,'tentativa':2,'anterior_id':pending['id']}
-        with patch.object(e,'api_json',return_value=[self.r['snapshot']]),patch.object(e,'load',return_value=pending),\
+        with patch.object(e,'municipal_check',return_value={'liberado':True}),patch.object(e,'api_json',return_value=[self.r['snapshot']]),patch.object(e,'load',return_value=pending),\
              patch.object(e,'worker',return_value={'ausente':True,'http':404}) as worker,patch.object(e,'rpc',return_value=new) as rpc:
             result=e.operate({},'admin',self.retry_body())
         self.assertEqual(worker.call_count,1);self.assertEqual(worker.call_args.args[2],'verificar_ausencia')
@@ -49,7 +49,7 @@ class NewAttemptTests(unittest.TestCase):
         worker.assert_not_called();rpc.assert_not_called()
     def test_any_other_get_result_blocks_new_number(self):
         for absence in [{'ausente':False,'http':200},{'ausente':False,'http':500},{'ausente':True,'http':200},{}]:
-            with patch.object(e,'api_json',return_value=[self.r['snapshot']]),patch.object(e,'load',return_value=self.pending()),\
+            with patch.object(e,'municipal_check',return_value={'liberado':True}),patch.object(e,'api_json',return_value=[self.r['snapshot']]),patch.object(e,'load',return_value=self.pending()),\
                  patch.object(e,'worker',return_value=absence),patch.object(e,'rpc') as rpc:
                 with self.assertRaises(SafeError):e.operate({},'admin',self.retry_body())
             rpc.assert_not_called()
