@@ -75,6 +75,25 @@ class MunicipalTests(unittest.TestCase):
                 result=e.operate({},'admin',body)
             self.assertTrue(result['bloqueio_parametros']);check.assert_called_once();rpc.assert_not_called();worker.assert_not_called()
 
+    def test_documentary_exception_requires_explicit_confirmation_and_real_divergence(self):
+        from tests.test_documentary_reference import documentary
+        draft=documentary();before=copy.deepcopy(draft)
+        token={'referencia_confirmada':'TESTAR_MODELO_APROVADO_SOMENTE_HOMOLOGACAO'}
+        conflict={'liberado':False,'situacao':'divergente','http':200}
+        with patch.object(e,'municipal_check',return_value=conflict):
+            self.assertFalse(e.municipal_gate({},draft,{},{}))
+            self.assertFalse(e.municipal_gate({},draft,{}, {'referencia_confirmada':True}))
+            answer={};self.assertTrue(e.municipal_gate({},draft,answer,token))
+            self.assertTrue(answer['excecao_documental'])
+            ordinary=copy.deepcopy(draft);ordinary['dados_fiscais']['homologacao_por_referencia']=False
+            self.assertFalse(e.municipal_gate({},ordinary,{},token))
+        for result in [{'liberado':False,'situacao':'indisponivel','http':200},
+                       {'liberado':False,'situacao':'divergente','http':429},
+                       {'liberado':False}]:
+            with patch.object(e,'municipal_check',return_value=result):
+                self.assertFalse(e.municipal_gate({},draft,{},token))
+        self.assertEqual(draft,before)
+
     def test_worker_diagnostic_cannot_sign_reserve_or_transmit(self):
         synthetic.EmissionTests.setUpClass.__func__(self.__class__)
         with patch.object(w,'validate_municipal',return_value={'liberado':False}) as validate,patch.object(w,'sign_homologation_dps') as sign,patch.object(w,'Transport') as transport:

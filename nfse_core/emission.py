@@ -93,9 +93,13 @@ def municipal_check(config, draft):
                 'mensagem': 'Não foi possível consultar os parâmetros municipais. A operação foi bloqueada antes de reservar, assinar ou transmitir.'}
 
 
-def municipal_gate(config, draft, answer):
+def municipal_gate(config, draft, answer, body=None):
     answer['parametros_iss'] = municipal_check(config, draft)
-    answer['bloqueio_parametros'] = answer['parametros_iss'].get('liberado') is not True
+    exception = (reference_mode(draft) and (body or {}).get('referencia_confirmada') == 'TESTAR_MODELO_APROVADO_SOMENTE_HOMOLOGACAO'
+                 and answer['parametros_iss'].get('situacao') == 'divergente'
+                 and answer['parametros_iss'].get('http') == 200)
+    answer['excecao_documental'] = exception
+    answer['bloqueio_parametros'] = answer['parametros_iss'].get('liberado') is not True and not exception
     return not answer['bloqueio_parametros']
 
 
@@ -160,7 +164,7 @@ def operate(config, author, body):
     if action == 'nova_tentativa':
         if body.get('confirmacao') != 'NOVA_DPS_SOMENTE_HOMOLOGACAO' or not retry_available(reservation):
             raise SafeError(409, 'NOVA_TENTATIVA_INDISPONIVEL', 'Consulte a tentativa anterior e confirme a criação de uma nova numeração de teste.')
-        if not municipal_gate(config, draft, answer):
+        if not municipal_gate(config, draft, answer, body):
             return answer
         # GET fresco antes da disputa transacional; nunca repete o POST antigo.
         absence = worker(config, reservation, 'verificar_ausencia')
@@ -172,7 +176,7 @@ def operate(config, author, body):
     elif action == 'preparar':
         if reservation and reservation.get('estado') not in ('reservada', 'falha_local'):
             return answer  # Repetição não gera nem substitui XML assinado.
-        if not municipal_gate(config, draft, answer):
+        if not municipal_gate(config, draft, answer, body):
             return answer
         if not reservation:
             # Confere A1 antes de consumir número; o material só é aberto no worker.
@@ -194,7 +198,7 @@ def operate(config, author, body):
     elif action == 'transmitir':
         if not reservation or reservation.get('estado') != 'assinada' or not reservation.get('dps_xml_cifrado'):
             raise SafeError(409, 'ESTADO_NAO_PERMITE_ENVIO', 'Prepare a DPS ou consulte seu estado. Um envio anterior não será repetido.')
-        if not municipal_gate(config, draft, answer):
+        if not municipal_gate(config, draft, answer, body):
             return answer
         reservation = rpc(config, 'nfse_iniciar_envio_homologacao', {'p_id': reservation['id'], 'p_autor': author})
         try:

@@ -1,6 +1,6 @@
 (function(){
   'use strict';
-  let busy=false,draft=null,root=null;
+  let busy=false,draft=null,root=null,referenceConfirmed=false;
   const labels={nao_reservada:'Sem DPS reservada',reservada:'Numeração reservada',falha_local:'Preparação interrompida',assinada:'DPS assinada localmente',enviando:'Envio em andamento',pendente_consulta:'Resultado pendente de consulta',autorizada:'Autorizada em homologação',rejeitada:'Rejeitada em homologação'};
   function text(value,tag='p'){const node=document.createElement(tag);node.textContent=value;root.append(node);return node}
   async function request(action){
@@ -12,6 +12,7 @@
     const body={acao:action,rascunho_id:draft.id,versao:draft.updated_at};
     if(action==='transmitir')body.confirmacao='ENVIAR_SOMENTE_HOMOLOGACAO';
     if(action==='nova_tentativa')body.confirmacao='NOVA_DPS_SOMENTE_HOMOLOGACAO';
+    if(referenceConfirmed&&['preparar','transmitir','nova_tentativa'].includes(action))body.referencia_confirmada='TESTAR_MODELO_APROVADO_SOMENTE_HOMOLOGACAO';
     const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),125000);
     try{
       const response=await fetch('/api/nfse/homologacao',{method:'POST',mode:'same-origin',credentials:'omit',cache:'no-store',redirect:'error',signal:abort.signal,
@@ -54,7 +55,14 @@
       if(municipal.vigencia_inicio)text(`Vigência: ${municipal.vigencia_inicio} até ${municipal.vigencia_fim||'sem data final'}.`);
       if(result.bloqueio_parametros)text('Preparação, nova reserva e transmissão bloqueadas. A consulta de retorno continua disponível.');
     }
-    const blocked=result.bloqueio_parametros===true;
+    const documentary=result.modo_validacao==='referencia_documental';
+    const exceptionAllowed=referenceConfirmed&&documentary&&municipal?.situacao==='divergente'&&municipal?.http===200;
+    const blocked=result.bloqueio_parametros===true&&!exceptionAllowed;
+    if(documentary){
+      const opt=document.createElement('button');opt.type='button';opt.className='ghost';opt.textContent=referenceConfirmed?'Modelo aprovado habilitado · somente homologação':'Habilitar tentativa conforme XMLs aprovados';opt.disabled=referenceConfirmed;
+      opt.addEventListener('click',()=>{if(window.confirm('Testar em HOMOLOGAÇÃO conforme os XMLs aprovados, apesar da divergência municipal? Os dados fiscais serão preservados. Falha de consulta, duplicidade e demais bloqueios continuam impedindo a operação.')){referenceConfirmed=true;render(result)}});root.append(opt);
+    }
+    if(result.excecao_documental||referenceConfirmed)text('Teste documental explicitamente confirmado. A divergência municipal permanece registrada; a aceitação depende da API de homologação.');
     const actions=document.createElement('div');actions.className='nf-buttons';actions.append(
       button('Validar ISS na competência do rascunho','validar_parametros',false),
       button('Preparar DPS de homologação','preparar',blocked||!['nao_reservada','reservada','falha_local'].includes(state)),
@@ -87,7 +95,7 @@
   }
   async function open(saved){
     if(busy)return;
-    draft=saved;root=document.getElementById('nfHomologationResult');
+    referenceConfirmed=false;draft=saved;root=document.getElementById('nfHomologationResult');
     if(!root){root=document.createElement('section');root.id='nfHomologationResult';root.className='nf-card';root.setAttribute('role','status');root.setAttribute('aria-live','polite');document.getElementById('nfRecords').before(root)}
     root.replaceChildren();text(`Homologação · ${saved.referencia}`,'h3');await run('status');
   }

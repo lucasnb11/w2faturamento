@@ -29,6 +29,10 @@ class handler(JsonHandler):
                 raise SafeError(400, 'ACAO_INVALIDA', 'Ação não permitida.')
             confirmations = {'transmitir': 'ENVIAR_SOMENTE_HOMOLOGACAO', 'nova_tentativa': 'NOVA_DPS_SOMENTE_HOMOLOGACAO'}
             expected = {'acao', 'rascunho_id', 'versao'} | ({'confirmacao'} if body['acao'] in confirmations else set())
+            if 'referencia_confirmada' in body:
+                if body['acao'] not in ('preparar', 'transmitir', 'nova_tentativa') or body['referencia_confirmada'] != 'TESTAR_MODELO_APROVADO_SOMENTE_HOMOLOGACAO':
+                    raise SafeError(400, 'DADOS_INVALIDOS', 'Confirme o teste documental em homologação.')
+                expected.add('referencia_confirmada')
             if (set(body) != expected or type(body.get('rascunho_id')) is not int or body['rascunho_id'] < 1
                 or not isinstance(body.get('versao'), str) or not 1 <= len(body['versao']) <= 64
                 or body['acao'] in confirmations and body.get('confirmacao') != confirmations[body['acao']]):
