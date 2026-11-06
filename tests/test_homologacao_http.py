@@ -43,6 +43,17 @@ class HomologationHttpTests(unittest.TestCase):
         for extra in [{'competencia':'2026-01-01'},{'url':'https://evil.example'},{'ambiente':'producao'}]:
             self.assertEqual(self.call({**body,**extra})[0],400)
 
+    def test_documentary_exception_is_explicit_and_only_for_mutations(self):
+        token='TESTAR_MODELO_APROVADO_SOMENTE_HOMOLOGACAO'
+        for action in ['preparar','transmitir','nova_tentativa']:
+            body={'acao':action,'rascunho_id':2,'versao':'current','referencia_confirmada':token}
+            if action!='preparar':
+                body['confirmacao']='ENVIAR_SOMENTE_HOMOLOGACAO' if action=='transmitir' else 'NOVA_DPS_SOMENTE_HOMOLOGACAO'
+            self.assertEqual(self.call(body)[0],200)
+            for bad in [True,'producao','']:
+                self.assertEqual(self.call({**body,'referencia_confirmada':bad})[0],400)
+        self.assertEqual(self.call({'acao':'status','rascunho_id':2,'versao':'current','referencia_confirmada':token})[0],400)
+
     def test_transmission_requires_separate_explicit_confirmation(self):
         body={'acao':'transmitir','rascunho_id':2,'versao':'current'}
         self.assertEqual(self.call(body)[0],400)

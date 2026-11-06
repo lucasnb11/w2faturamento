@@ -56,5 +56,15 @@ async function scenario(role='administrador',state='assinada',confirmation=true,
   await blocked.root.querySelectorAll('button').find(n=>n.textContent==='Validar ISS na competência do rascunho').listeners.click();
   assert.equal(blocked.calls[1].body.acao,'validar_parametros');
   assert.deepEqual(Object.keys(blocked.calls[1].body).sort(),['acao','rascunho_id','versao']);
+  const documented=await scenario('administrador','assinada',true,'',false,{modo_validacao:'referencia_documental',bloqueio_parametros:true,parametros_iss:{situacao:'divergente',http:200}});
+  await documented.root.querySelectorAll('button').find(n=>n.textContent==='Habilitar tentativa conforme XMLs aprovados').listeners.click();
+  assert.equal(documented.calls.length,1);
+  assert.equal(documented.root.querySelectorAll('button').find(n=>n.textContent==='Transmitir somente em homologação').disabled,false);
+  await documented.root.querySelectorAll('button').find(n=>n.textContent==='Transmitir somente em homologação').listeners.click();
+  assert.equal(documented.calls[1].body.referencia_confirmada,'TESTAR_MODELO_APROVADO_SOMENTE_HOMOLOGACAO');
+  assert.equal(documented.calls[1].body.confirmacao,'ENVIAR_SOMENTE_HOMOLOGACAO');
+  const unavailable=await scenario('administrador','assinada',true,'',false,{modo_validacao:'referencia_documental',bloqueio_parametros:true,parametros_iss:{situacao:'indisponivel',http:429}});
+  await unavailable.root.querySelectorAll('button').find(n=>n.textContent==='Habilitar tentativa conforme XMLs aprovados').listeners.click();
+  assert.equal(unavailable.root.querySelectorAll('button').find(n=>n.textContent==='Transmitir somente em homologação').disabled,true);
   console.log('OK: homologação exige administrador e confirmação separada; resultado incerto bloqueia novo envio e dados fiscais não saem do navegador.');
 })().catch(e=>{console.error(e);process.exitCode=1});
