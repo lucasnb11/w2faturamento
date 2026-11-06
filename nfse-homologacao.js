@@ -32,20 +32,36 @@
     if(s.tentativa)text(`Tentativa ${s.tentativa}${s.anterior_id?' · Tentativa anterior e XML preservados no histórico.':'.'}`);
     if(s.retorno_http)text(`Último retorno da API: HTTP ${s.retorno_http}.`);
     if(Array.isArray(s.erros_codigos)&&s.erros_codigos.length)text(`Códigos: ${s.erros_codigos.join(', ')}.`);
-    if(s.erros_codigos?.includes('E0429'))text('E0429: a API rejeitou a carga de ISS calculada pela regra de redução da base e mínimo de 2%, com exceções por serviço. Confira base, deduções, benefício e parâmetros municipais na competência. Não é HTTP 429; aguardar não corrige os dados. Não altere a tributação sem fundamento.');
-    if(Array.isArray(s.erros_codigos)&&s.erros_codigos.includes('E0008'))text('E0008: a API considerou a data/hora de emissão da DPS posterior à do processamento. Consulte o retorno desta tentativa; o XML assinado e o histórico serão preservados, sem reenvio automático.');
+    const original=result.retorno_transmissao;
+    if(original){
+      text(`Retorno registrado após a transmissão: HTTP ${original.http??'não registrado'}${original.codigos?.length?' · '+original.codigos.join(', '):''}.`);
+      if(s.retorno_http===404)text('O HTTP 404 é o retorno de uma consulta posterior. Ele não apaga o resultado registrado após a transmissão nem comprova autorização.');
+    }
+    const codes=[...(s.erros_codigos||[]),...(original?.codigos||[])];
+    if(codes.includes('E0429'))text('E0429: a API rejeitou a carga de ISS calculada pela regra de redução da base e mínimo de 2%, com exceções por serviço. Confira base, deduções, benefício e parâmetros municipais na competência. Não é HTTP 429; aguardar não corrige os dados. Não altere a tributação sem fundamento.');
+    if(codes.includes('E0008'))text('E0008: a API considerou a data/hora de emissão da DPS posterior à do processamento. Consulte o retorno desta tentativa; o XML assinado e o histórico serão preservados, sem reenvio automático.');
     if(s.chave_acesso)text(`Chave da NFS-e de homologação: ${s.chave_acesso}`);
     if(state==='pendente_consulta'||state==='enviando')text('O envio não será repetido. Consulte o retorno para conciliar esta DPS.');
     if(result.nova_tentativa_disponivel===true)text('É possível reservar outra numeração de teste após confirmar a ação. O servidor consultará o identificador anterior e exigirá HTTP 404 antes de reservar. A DPS anterior continuará preservada.');
     if(state==='rejeitada')text(s.erros_codigos?.includes('E0714')?'E0714: arquivo enviado com erro na assinatura. A tentativa e seu XML foram preservados; a criação de outra DPS exige confirmação e nova consulta 404.':'A API rejeitou a assinatura ou o certificado. A tentativa foi preservada para análise; não há reenvio automático.');
     if(state==='assinada')text('Assinatura conferida localmente. A aceitação fiscal ainda será validada pela API de homologação.');
     if(result.pendencias?.length){text('Confira e salve os dados fiscais antes de preparar a DPS. Nenhum novo número foi reservado.');const list=document.createElement('ul');for(const issue of result.pendencias){const item=document.createElement('li');item.textContent=issue.mensagem;list.append(item)}root.append(list)}
+    const municipal=result.parametros_iss;
+    if(municipal){
+      text(`Validação municipal · competência ${municipal.competencia||'não confirmada'} · serviço ${municipal.codigo_servico||'não confirmado'}.`);
+      text(municipal.mensagem);
+      if(municipal.incidencia)text(`Incidência: ${municipal.incidencia} · Alíquota na API: ${municipal.aliquota??'não definida'} · Alíquota no rascunho: ${municipal.aliquota_rascunho??'não informada'}.`);
+      if(municipal.vigencia_inicio)text(`Vigência: ${municipal.vigencia_inicio} até ${municipal.vigencia_fim||'sem data final'}.`);
+      if(result.bloqueio_parametros)text('Preparação, nova reserva e transmissão bloqueadas. A consulta de retorno continua disponível.');
+    }
+    const blocked=result.bloqueio_parametros===true;
     const actions=document.createElement('div');actions.className='nf-buttons';actions.append(
-      button('Preparar DPS de homologação','preparar',!['nao_reservada','reservada','falha_local'].includes(state)),
-      button('Transmitir somente em homologação','transmitir',state!=='assinada'),
+      button('Validar ISS na competência do rascunho','validar_parametros',false),
+      button('Preparar DPS de homologação','preparar',blocked||!['nao_reservada','reservada','falha_local'].includes(state)),
+      button('Transmitir somente em homologação','transmitir',blocked||state!=='assinada'),
       button('Consultar retorno','conciliar',!['enviando','pendente_consulta','autorizada','rejeitada'].includes(state)),
       button('Baixar XML de homologação','baixar_xml',state!=='autorizada'),
-      button('Reservar nova tentativa de homologação','nova_tentativa',result.nova_tentativa_disponivel!==true));
+      button('Reservar nova tentativa de homologação','nova_tentativa',blocked||result.nova_tentativa_disponivel!==true));
     root.append(actions);
     text('A preparação reserva numeração de teste e assina a DPS no servidor. A transmissão exige uma confirmação separada.');
   }

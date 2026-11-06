@@ -2,6 +2,7 @@
 import base64
 from datetime import datetime, timezone
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -52,6 +53,52 @@ def retry_available(reservation):
         return False
 
 
+def submission_result(config, reservation):
+    """Primeiro resultado após o envio, sem atribuir um GET posterior ao POST."""
+    if not reservation or not reservation.get('id'):
+        return None
+    query = urlencode({'dps_id': 'eq.' + reservation['id'], 'tipo': 'eq.estado',
+                       'select': 'estado,created_at,detalhes', 'order': 'created_at.asc', 'limit': '1000'})
+    events = api_json(config, '/rest/v1/nfse_homologacao_eventos?' + query)
+    waiting, result = False, None
+    for event in events if isinstance(events, list) else []:
+        if not isinstance(event, dict):
+            continue
+        if event.get('estado') == 'enviando':
+            waiting, result = True, None
+        elif waiting and event.get('estado') in ('pendente_consulta', 'rejeitada', 'autorizada'):
+            waiting = False
+            detail = event.get('detalhes') or {}
+            if not isinstance(detail, dict):
+                continue
+            codes, http = detail.get('codigos'), detail.get('http')
+            if 'http' not in detail or not isinstance(codes, list) or len(codes) > 5:
+                continue  # Legado sem metadados: não reconstruir pelo GET seguinte.
+            if http is not None and (type(http) is not int or not 100 <= http <= 599):
+                continue
+            if not all(isinstance(c, str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,40}', c) for c in codes):
+                continue
+            result = {'http': http, 'codigos': codes, 'registrado_em': event.get('created_at')}
+    return result
+
+
+def municipal_check(config, draft):
+    try:
+        result = worker(config, {'snapshot': draft}, 'validar_parametros').get('parametros_iss')
+        if not isinstance(result, dict) or type(result.get('liberado')) is not bool:
+            raise ValueError()
+        return result
+    except (SafeError, ValueError):
+        return {'liberado': False, 'situacao': 'indisponivel',
+                'mensagem': 'Não foi possível consultar os parâmetros municipais. A operação foi bloqueada antes de reservar, assinar ou transmitir.'}
+
+
+def municipal_gate(config, draft, answer):
+    answer['parametros_iss'] = municipal_check(config, draft)
+    answer['bloqueio_parametros'] = answer['parametros_iss'].get('liberado') is not True
+    return not answer['bloqueio_parametros']
+
+
 def worker(config, reservation, action):
     payload = {'key': base64.b64encode(config['encryption_key']).decode(), 'reservation': reservation, 'action': action}
     if action != 'baixar_xml':
@@ -91,6 +138,7 @@ def operate(config, author, body):
     reservation = load(config, body['rascunho_id'])
     answer = {'ambiente': 'homologacao', 'emissao_oficial_disponivel': False,
         'situacao': metadata(reservation), 'pendencias': [],
+        'retorno_transmissao': submission_result(config, reservation),
         'nova_tentativa_disponivel': retry_available(reservation),
         'aviso': 'Ambiente de testes. Nenhuma NFS-e de produção é emitida por esta operação.'}
     documentary = reference_mode(reservation['snapshot'] if reservation else draft)
@@ -101,14 +149,19 @@ def operate(config, author, body):
         return answer
     if action in ('preparar', 'transmitir') and reservation and reservation.get('rascunho_versao') != body['versao']:
         raise SafeError(409, 'RESERVA_OUTRA_VERSAO', 'Há DPS reservada para outra versão. Concilie a reserva antes de continuar.')
-    if action in ('preparar', 'transmitir', 'nova_tentativa'):
+    if action in ('preparar', 'transmitir', 'nova_tentativa', 'validar_parametros'):
         validation = inspect(draft)
         if not validation['xsd_valido'] or validation['pendencias']:
             answer['pendencias'] = validation['pendencias']
             return answer  # Sem reservar ou acessar o A1 quando há pendências fiscais.
+    if action == 'validar_parametros':
+        municipal_gate(config, draft, answer)
+        return answer
     if action == 'nova_tentativa':
         if body.get('confirmacao') != 'NOVA_DPS_SOMENTE_HOMOLOGACAO' or not retry_available(reservation):
             raise SafeError(409, 'NOVA_TENTATIVA_INDISPONIVEL', 'Consulte a tentativa anterior e confirme a criação de uma nova numeração de teste.')
+        if not municipal_gate(config, draft, answer):
+            return answer
         # GET fresco antes da disputa transacional; nunca repete o POST antigo.
         absence = worker(config, reservation, 'verificar_ausencia')
         if absence.get('ausente') is not True or absence.get('http') != 404:
@@ -119,6 +172,8 @@ def operate(config, author, body):
     elif action == 'preparar':
         if reservation and reservation.get('estado') not in ('reservada', 'falha_local'):
             return answer  # Repetição não gera nem substitui XML assinado.
+        if not municipal_gate(config, draft, answer):
+            return answer
         if not reservation:
             # Confere A1 antes de consumir número; o material só é aberto no worker.
             certs = api_json(config, '/rest/v1/' + TABLE + '?cnpj=eq.' + CNPJ + '&select=valido_desde,valido_ate&limit=1')
@@ -139,6 +194,8 @@ def operate(config, author, body):
     elif action == 'transmitir':
         if not reservation or reservation.get('estado') != 'assinada' or not reservation.get('dps_xml_cifrado'):
             raise SafeError(409, 'ESTADO_NAO_PERMITE_ENVIO', 'Prepare a DPS ou consulte seu estado. Um envio anterior não será repetido.')
+        if not municipal_gate(config, draft, answer):
+            return answer
         reservation = rpc(config, 'nfse_iniciar_envio_homologacao', {'p_id': reservation['id'], 'p_autor': author})
         try:
             result = worker(config, reservation, 'transmitir')
@@ -168,4 +225,5 @@ def operate(config, author, body):
         raise SafeError(400, 'ACAO_INVALIDA', 'Ação não permitida.')
     answer['situacao'] = metadata(reservation)
     answer['nova_tentativa_disponivel'] = retry_available(reservation)
+    answer['retorno_transmissao'] = submission_result(config, reservation)
     return answer

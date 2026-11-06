@@ -104,7 +104,7 @@ def _read_service(context, path, service):
     parameter_path = (isinstance(path, str) and bool(re.fullmatch(r'/[A-Za-z0-9_/-]{1,180}', path))
         and '//' not in path and bool(re.search(r'(^|/)1500800(/|$)', path))
         and any(word in path.lower() for word in ('municip', 'conven')))
-    rate_history = path == '/1500800/26.01.01.000/historicoaliquotas'
+    rate_history = isinstance(path, str) and bool(re.fullmatch(r'/1500800/26\.01\.01\.[0-9]{3}/historicoaliquotas', path))
     if path not in DOCS and not (service == 'parametros' and (parameter_path or rate_history)):
         raise NationalError('Consulta fora do escopo do diagnóstico.')
     host, prefix = (HOST, BASE) if service == 'sefin' else (PARAM_HOST, PARAM_BASE)
